@@ -21,6 +21,7 @@ except ImportError:
     def remove_favorite(path): pass
     def get_favorites(): return []
 
+from ui.tag_suggestion import TagSuggestPopup
 from services.preference_service import PreferenceService
 
 # ==================== TagFlowLayout ====================
@@ -100,21 +101,15 @@ class TagChip(QFrame):
         btn_close.clicked.connect(lambda: self.sig_remove.emit(self.text))
         layout.addWidget(btn_close)
 
-# ==================== HistoryLineEdit ====================
-class HistoryLineEdit(QLineEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-    def focusInEvent(self, event):
-        super().focusInEvent(event)
-        self._show_completer()
+# ==================== ClickableLineEdit (for tag input) ====================
+class ClickableLineEdit(QLineEdit):
+    """A QLineEdit that emits a 'clicked' signal on mouse press."""
+    clicked = pyqtSignal()
+
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        self._show_completer()
-    def _show_completer(self):
-        c = self.completer()
-        if c:
-            c.setCompletionPrefix(self.text())
-            c.complete()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 # ==================== Utils ====================
 def format_time(t): return time.strftime("%Y/%m/%d %H:%M", time.localtime(t)) if t else "-"
@@ -286,6 +281,7 @@ class MetadataPanel(QWidget):
         super().__init__(parent)
         self.current_file_path = None
         self.current_tags = []
+        self.popup = None  # Reference to the suggestion popup
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -313,17 +309,14 @@ class MetadataPanel(QWidget):
         tag_layout = QVBoxLayout(tag_container)
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
-        self.txt_tag_input = HistoryLineEdit()
-        self.txt_tag_input.setPlaceholderText("输入标签，按回车快速添加...")
+        self.txt_tag_input = ClickableLineEdit()
+        self.txt_tag_input.setPlaceholderText("点击选择或输入标签, 按回车添加...")
         self.txt_tag_input.setStyleSheet("""
             QLineEdit { background-color: #1a1a1a; border: 1px solid #444; border-radius: 3px; padding: 4px 8px; color: #ddd; font-size: 12px; }
             QLineEdit:focus { border: 1px solid #0078d7; background-color: #111; }
         """)
-        self.completer = QCompleter()
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.txt_tag_input.setCompleter(self.completer)
         self.txt_tag_input.returnPressed.connect(self.request_add_tag)
+        self.txt_tag_input.clicked.connect(self.show_tag_popup)
         tag_layout.addWidget(self.txt_tag_input)
         lbl_tag_title = QLabel("标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
@@ -340,12 +333,30 @@ class MetadataPanel(QWidget):
         layout.addWidget(tag_container, 1)
         self.copy_btn = FloatingCopyBtn(self)
 
+    def show_tag_popup(self):
+        """Creates, positions, and shows the tag suggestion popup."""
+        if self.popup and self.popup.isVisible():
+            return
+
+        self.popup = TagSuggestPopup(self)
+        self.popup.sig_tag_selected.connect(self.add_suggested_tag)
+
+        input_box = self.txt_tag_input
+        global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
+        self.popup.move(global_pos)
+        self.popup.show()
+
+    def add_suggested_tag(self, tag):
+        """Handles adding a tag selected from the popup."""
+        if self.current_file_path and os.path.exists(self.current_file_path):
+            self.sig_add_tag.emit(self.current_file_path, tag)
+            self.txt_tag_input.clear()
+
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
         else: self.copy_btn.hide()
     def update_info(self, filename, info):
         self.copy_btn.hide()
-        self.completer.setModel(QStringListModel(PreferenceService.get_recent_tags()))
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
