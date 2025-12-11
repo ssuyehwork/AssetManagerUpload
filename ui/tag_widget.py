@@ -62,24 +62,28 @@ class FlowLayout(QLayout):
             lineHeight = max(lineHeight, item.sizeHint().height())
         return y + lineHeight - rect.y() + bottom
 
-# ==================== 1. 标签块 (Tag Chip) ====================
+# ==================== 1. 标签块 (Tag Chip) - 增强样式优先级 ====================
 class TagChip(QFrame):
     sig_remove = pyqtSignal(str) 
 
     def __init__(self, text, parent=None):
         super().__init__(parent)
         self.text = text
+        
+        # 设置尺寸策略为自适应宽度
+        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(28)
         
+        # 【关键修复】使用 TagChip 类名选择器提高优先级，避免被全局样式覆盖
         self.setStyleSheet("""
-            QFrame { 
-                background-color: #3C3C3C; 
-                border: 1px solid #505050; 
+            TagChip { 
+                background-color: #3C3C3C !important; 
+                border: 1px solid #505050 !important; 
                 border-radius: 4px; 
             }
-            QFrame:hover { 
-                background-color: #444;
-                border: 1px solid #888; 
+            TagChip:hover { 
+                background-color: #444 !important;
+                border: 1px solid #888 !important; 
             }
         """)
         
@@ -87,32 +91,51 @@ class TagChip(QFrame):
         layout.setContentsMargins(10, 0, 4, 0)
         layout.setSpacing(4)
         
+        # 标签文本
         lbl = QLabel(text)
-        lbl.setStyleSheet("border: none; background: transparent; color: #E0E0E0; font-size: 12px;")
+        lbl.setObjectName("TagChipLabel")  # 设置对象名便于定位
+        lbl.setStyleSheet("""
+            QLabel#TagChipLabel { 
+                border: none !important; 
+                background: transparent !important; 
+                color: #E0E0E0 !important; 
+                font-size: 12px;
+            }
+        """)
+        lbl.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
         layout.addWidget(lbl)
         
+        # 【关键修复】关闭按钮使用更高优先级样式
         btn_close = QPushButton("×")
+        btn_close.setObjectName("TagChipCloseBtn")  # 设置对象名
         btn_close.setFixedSize(20, 20)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.setStyleSheet("""
-            QPushButton { 
-                border: none; 
-                background: transparent; 
-                color: #AAAAAA;          
+            QPushButton#TagChipCloseBtn { 
+                border: none !important; 
+                background: transparent !important; 
+                color: #AAAAAA !important;          
                 font-family: Arial; 
                 font-size: 18px;
                 font-weight: normal;
-                padding-bottom: 3px;
-                margin: 0px;
+                padding: 0px !important;
+                margin: 0px !important;
             }
-            QPushButton:hover { 
-                color: #FF5555;       
+            QPushButton#TagChipCloseBtn:hover { 
+                color: #FF5555 !important;       
+                background: transparent !important;
+            }
+            QPushButton#TagChipCloseBtn:pressed { 
+                background: transparent !important;
             }
         """)
         btn_close.clicked.connect(lambda: self.sig_remove.emit(self.text))
         layout.addWidget(btn_close)
+        
+        # 调整整体宽度以适应内容
+        self.adjustSize()
 
-# ==================== 2. 下拉项 (Grid Item) - 高度压缩 ====================
+# ==================== 2. 下拉项 (Grid Item) ====================
 class TagGridItem(QFrame):
     sig_clicked = pyqtSignal(str) 
 
@@ -120,7 +143,6 @@ class TagGridItem(QFrame):
         super().__init__(parent)
         self.text_val = text
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        # 【关键修改】高度从 34 压缩到 30，更紧凑
         self.setFixedHeight(30)
         
         self.default_style = """
@@ -177,7 +199,7 @@ class TagGridItem(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.sig_clicked.emit(self.text_val)
 
-# ==================== 3. 弹窗容器 (Popup) - 间距压缩 ====================
+# ==================== 3. 弹窗容器 (Popup) ====================
 class TagSelectionPopup(QDialog):
     sig_tags_changed = pyqtSignal(list) 
 
@@ -250,7 +272,6 @@ class TagSelectionPopup(QDialog):
         self.content_widget.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(self.content_widget)
         self.content_layout.setContentsMargins(12, 12, 12, 12)
-        # 【关键修改】减少分区间距 (从 16 -> 8)
         self.content_layout.setSpacing(8) 
         
         self.scroll_area.setWidget(self.content_widget)
@@ -381,8 +402,6 @@ class TagSelectionPopup(QDialog):
         grid_widget = QWidget()
         grid = QGridLayout(grid_widget)
         grid.setContentsMargins(0, 0, 0, 0)
-        
-        # 【关键修改】大幅减少网格垂直间距 (从 8 -> 2)
         grid.setVerticalSpacing(2) 
         grid.setHorizontalSpacing(8)
         
@@ -434,20 +453,27 @@ class TagSelectionPopup(QDialog):
 
 # ==================== 4. 标签输入区域 (对外接口) ====================
 class TagInputArea(QFrame):
+    sig_tags_changed = pyqtSignal(list)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tags = []
         self.popup = None
         
-        self.setMinimumHeight(52) 
+        # 【修改】最小高度从 52 减少到 47 (减少5px)
+        self.setMinimumHeight(47) 
         
+        # 【增强】使用对象名提高样式优先级
+        self.setObjectName("TagInputArea")
         self.setStyleSheet("""
-            TagInputArea {
-                background-color: #252525; 
-                border: 1px solid #444; 
+            QFrame#TagInputArea {
+                background-color: #252525 !important; 
+                border: 1px solid #444 !important; 
                 border-radius: 4px;
             }
-            TagInputArea:hover { border: 1px solid #0078D7; }
+            QFrame#TagInputArea:hover { 
+                border: 1px solid #0078D7 !important; 
+            }
         """)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         
@@ -491,6 +517,9 @@ class TagInputArea(QFrame):
         if tag in self.tags:
             self.tags.remove(tag)
             self.render()
+            
+            self.sig_tags_changed.emit(self.tags)
+            
             if self.popup and self.popup.isVisible():
                 self.popup.selected_tags = set(self.tags)
                 self.popup.refresh_ui(self.popup.search_input.text())
@@ -507,3 +536,5 @@ class TagInputArea(QFrame):
     def on_popup_tags_changed(self, new_tags):
         self.tags = new_tags
         self.render()
+        
+        self.sig_tags_changed.emit(self.tags)

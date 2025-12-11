@@ -22,6 +22,9 @@ except ImportError:
     def get_favorites(): return []
 
 from services.preference_service import PreferenceService
+# 【核心修复】从 tag_widget 导入正确的弹窗
+from ui.tag_widget import TagSelectionPopup, TagChip
+from services.tag_service import TagService
 
 # ==================== TagFlowLayout ====================
 class TagFlowLayout(QLayout):
@@ -74,47 +77,15 @@ class TagFlowLayout(QLayout):
             lineHeight = max(lineHeight, item.sizeHint().height())
         return y + lineHeight - rect.y() + bottom
 
-# ==================== TagChip ====================
-class TagChip(QFrame):
-    sig_remove = pyqtSignal(str)
-    def __init__(self, text, parent=None):
-        super().__init__(parent)
-        self.text = text
-        self.setStyleSheet("""
-            QFrame { background-color: #333333; border: 1px solid #444; border-radius: 4px; }
-            QFrame:hover { background-color: #3e3e3e; border: 1px solid #555; }
-        """)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 2, 4, 2)
-        layout.setSpacing(6)
-        lbl = QLabel(text)
-        lbl.setStyleSheet("border: none; background: transparent; color: #ddd;")
-        layout.addWidget(lbl)
-        btn_close = QPushButton("×")
-        btn_close.setFixedSize(16, 16)
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setStyleSheet("""
-            QPushButton { border: none; background: transparent; color: #777; font-weight: bold; padding-bottom: 2px; }
-            QPushButton:hover { color: #ff6b6b; }
-        """)
-        btn_close.clicked.connect(lambda: self.sig_remove.emit(self.text))
-        layout.addWidget(btn_close)
+# ==================== ClickableLineEdit (for tag input) ====================
+class ClickableLineEdit(QLineEdit):
+    """A QLineEdit that emits a 'clicked' signal on mouse press."""
+    clicked = pyqtSignal()
 
-# ==================== HistoryLineEdit ====================
-class HistoryLineEdit(QLineEdit):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-    def focusInEvent(self, event):
-        super().focusInEvent(event)
-        self._show_completer()
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        self._show_completer()
-    def _show_completer(self):
-        c = self.completer()
-        if c:
-            c.setCompletionPrefix(self.text())
-            c.complete()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 # ==================== Utils ====================
 def format_time(t): return time.strftime("%Y/%m/%d %H:%M", time.localtime(t)) if t else "-"
@@ -286,6 +257,7 @@ class MetadataPanel(QWidget):
         super().__init__(parent)
         self.current_file_path = None
         self.current_tags = []
+        self.popup = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -313,17 +285,29 @@ class MetadataPanel(QWidget):
         tag_layout = QVBoxLayout(tag_container)
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
-        self.txt_tag_input = HistoryLineEdit()
-        self.txt_tag_input.setPlaceholderText("输入标签，按回车快速添加...")
+        self.txt_tag_input = ClickableLineEdit()
+        self.txt_tag_input.setPlaceholderText("请先选择一个项目")
         self.txt_tag_input.setStyleSheet("""
-            QLineEdit { background-color: #1a1a1a; border: 1px solid #444; border-radius: 3px; padding: 4px 8px; color: #ddd; font-size: 12px; }
-            QLineEdit:focus { border: 1px solid #0078d7; background-color: #111; }
+            QLineEdit { 
+                background-color: #1a1a1a; 
+                border: 1px solid #444; 
+                border-radius: 3px; 
+                padding: 4px 8px; 
+                color: #ddd; 
+                font-size: 12px; 
+            }
+            QLineEdit:focus { 
+                border: 1px solid #0078d7; 
+                background-color: #111; 
+            }
+            QLineEdit:disabled {
+                background-color: #2a2a2a;
+                color: #666;
+            }
         """)
-        self.completer = QCompleter()
-        self.completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.completer.setFilterMode(Qt.MatchFlag.MatchContains)
-        self.txt_tag_input.setCompleter(self.completer)
-        self.txt_tag_input.returnPressed.connect(self.request_add_tag)
+        self.txt_tag_input.returnPressed.connect(self.request_add_tag_from_input)
+        self.txt_tag_input.clicked.connect(self.show_tag_popup)
+        self.txt_tag_input.setEnabled(False)
         tag_layout.addWidget(self.txt_tag_input)
         lbl_tag_title = QLabel("标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
@@ -340,12 +324,58 @@ class MetadataPanel(QWidget):
         layout.addWidget(tag_container, 1)
         self.copy_btn = FloatingCopyBtn(self)
 
+    def show_tag_popup(self):
+        if not self.isEnabled() or not self.current_file_path: return
+        if self.popup and self.popup.isVisible(): return
+
+        self.popup = TagSelectionPopup(self.current_tags, self)
+        self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
+
+        input_box = self.txt_tag_input
+        global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
+        self.popup.move(global_pos)
+        self.popup.show()
+        self.popup.search_input.setFocus()
+        self.popup.search_input.selectAll()
+
+    def handle_tag_selection_changed(self, new_tags_list):
+        if not self.current_file_path: return
+
+        original_tags = set(self.current_tags)
+        new_tags = set(new_tags_list)
+        
+        tags_to_add = list(new_tags - original_tags)
+        tags_to_remove = list(original_tags - new_tags)
+        
+        # 核心Bug修复：分离添加和删除操作，因为它们是互斥的
+        updated_info = None
+        if tags_to_add:
+            updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
+        elif tags_to_remove:
+            updated_info = TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
+
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
+
+    def clear_info(self):
+        self.table.clearContents()
+        self.current_file_path = None
+        self.current_tags = []
+        self.render_tags()
+        self.txt_tag_input.setText("")
+        self.txt_tag_input.setPlaceholderText("请先选择一个项目")
+        self.txt_tag_input.setEnabled(False)
+
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
         else: self.copy_btn.hide()
+
     def update_info(self, filename, info):
         self.copy_btn.hide()
-        self.completer.setModel(QStringListModel(PreferenceService.get_recent_tags()))
+        self.txt_tag_input.setEnabled(True)
+        self.txt_tag_input.setPlaceholderText("点击选择或输入标签...")
+        
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
@@ -362,9 +392,11 @@ class MetadataPanel(QWidget):
         row(7, "评级", "★" * r if r else "无")
         self.current_tags = info.get("tags", [])
         self.render_tags()
+
     def set_current_file(self, full_path):
         self.current_file_path = full_path
         self.txt_tag_input.clear()
+
     def render_tags(self):
         while self.flow_layout.count():
             item = self.flow_layout.takeAt(0)
@@ -372,17 +404,27 @@ class MetadataPanel(QWidget):
             if widget: widget.deleteLater()
         for tag in self.current_tags:
             chip = TagChip(tag)
-            chip.sig_remove.connect(self.request_remove_tag)
+            chip.sig_remove.connect(self.request_remove_tag_from_chip)
             self.flow_layout.addWidget(chip)
-    def request_add_tag(self):
+
+    def request_add_tag_from_input(self):
         if not self.current_file_path or not os.path.exists(self.current_file_path): return
         text = self.txt_tag_input.text().strip()
         if not text: return
-        self.sig_add_tag.emit(self.current_file_path, text)
+        
+        updated_info = TagService.add_tag(self.current_file_path, text)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
         self.txt_tag_input.clear()
-    def request_remove_tag(self, tag_name):
+
+    def request_remove_tag_from_chip(self, tag_name):
         if not self.current_file_path: return
-        self.sig_remove_tag.emit(self.current_file_path, tag_name)
+        
+        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
 class FolderPanel(QWidget):
     sig_add_to_favorites = pyqtSignal(str)
