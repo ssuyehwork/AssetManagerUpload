@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
-                             QGridLayout, QLayout, QSizePolicy)
+                             QGridLayout, QLayout, QSizePolicy, QWidgetItem)
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 
@@ -20,6 +20,12 @@ class FlowLayout(QLayout):
         self.setContentsMargins(margin, margin, margin, margin)
 
     def addItem(self, item): self._items.append(item)
+
+    def insertWidget(self, index, widget):
+        item = QWidgetItem(widget)
+        self._items.insert(index, item)
+        self.invalidate()
+
     def horizontalSpacing(self): return self._hSpace
     def verticalSpacing(self): return self._vSpace
     def expandingDirections(self): return Qt.Orientation(0)
@@ -565,3 +571,125 @@ class TagInputArea(QFrame):
         self.render()
         
         self.sig_tags_changed.emit(self.tags)
+
+# ==================== 5. 交互式标签输入区 (新) ====================
+class InteractiveTagArea(QFrame):
+    sig_tags_submitted = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.staged_tags = []
+        self.popup = None
+
+        self.setMinimumHeight(47)
+        self.setObjectName("InteractiveTagArea")
+        self.setStyleSheet("""
+            QFrame#InteractiveTagArea {
+                background-color: #252525;
+                border: 1px solid #444;
+                border-radius: 4px;
+            }
+            QFrame#InteractiveTagArea:focus-within {
+                border: 1px solid #0078D7;
+            }
+        """)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+        self.layout = FlowLayout(self, margin=7, hSpacing=8, vSpacing=8)
+
+        self.line_edit = QLineEdit(self)
+        self.line_edit.setPlaceholderText("点击选择或输入标签...")
+        self.line_edit.setStyleSheet("""
+            QLineEdit {
+                background: transparent;
+                border: none;
+                color: #ddd;
+                padding: 0;
+                margin: 0;
+                font-size: 12px;
+            }
+        """)
+        self.line_edit.returnPressed.connect(self.submit_tags)
+        self.line_edit.installEventFilter(self)
+        self.layout.addWidget(self.line_edit)
+
+    def eventFilter(self, source, event):
+        if source == self.line_edit and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Backspace and not self.line_edit.text():
+                self.remove_last_tag()
+                return True
+        return super().eventFilter(source, event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.show_popup()
+        super().mousePressEvent(event)
+
+    def show_popup(self):
+        if self.popup and self.popup.isVisible(): return
+
+        self.popup = TagSelectionPopup(
+            self.staged_tags,
+            width=self.width(),
+            search_visible=True,
+            parent=self
+        )
+        self.popup.sig_tags_changed.connect(self.on_popup_tags_changed)
+
+        global_pos = self.mapToGlobal(QPoint(0, self.height() + 4))
+        self.popup.move(global_pos)
+        self.popup.show()
+        if self.popup.search_input:
+            self.popup.search_input.setFocus()
+
+    def on_popup_tags_changed(self, new_tags):
+        self.set_staged_tags(new_tags)
+        self.line_edit.setFocus()
+
+    def set_staged_tags(self, tags_list):
+        self.staged_tags = list(set(tags_list))
+        self.render()
+
+    def get_staged_tags(self):
+        return self.staged_tags
+
+    def render(self):
+        while self.layout.count() > 1:
+            item = self.layout.takeAt(0)
+            if item.widget() and item.widget() != self.line_edit:
+                item.widget().deleteLater()
+
+        for i, tag in enumerate(self.staged_tags):
+            chip = TagChip(tag)
+            chip.sig_remove.connect(self.remove_tag)
+            self.layout.insertWidget(i, chip)
+
+        if not self.staged_tags and not self.line_edit.text():
+             self.line_edit.setPlaceholderText("点击选择或输入标签...")
+        else:
+             self.line_edit.setPlaceholderText("")
+
+        self.updateGeometry()
+
+    def remove_tag(self, tag):
+        if tag in self.staged_tags:
+            self.staged_tags.remove(tag)
+            self.render()
+
+    def remove_last_tag(self):
+        if self.staged_tags:
+            self.staged_tags.pop()
+            self.render()
+
+    def submit_tags(self):
+        input_text = self.line_edit.text().strip()
+        final_tags = self.staged_tags.copy()
+
+        if input_text and input_text not in final_tags:
+            final_tags.append(input_text)
+
+        if final_tags:
+            self.sig_tags_submitted.emit(final_tags)
+
+        self.line_edit.clear()
+        self.set_staged_tags([])

@@ -250,17 +250,16 @@ class FavoritesPanel(QWidget):
 
 # ==================== MetadataPanel ====================
 class MetadataPanel(QWidget):
-    sig_add_tag = pyqtSignal(str, str)    
-    sig_remove_tag = pyqtSignal(str, str) 
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_file_path = None
         self.current_tags = []
-        self.popup = None
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
+        # === Part 1: Metadata Table ===
         self.table = QTableWidget(8, 2) 
         self.table.setHorizontalHeaderLabels(["属性", "值"])
         header = self.table.horizontalHeader()
@@ -275,68 +274,68 @@ class MetadataPanel(QWidget):
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setFixedHeight(285) 
         layout.addWidget(self.table, 0)
+
+        # === Part 2: Tag Area ===
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setStyleSheet("background-color: #000; border: none; min-height: 1px; max-height: 1px;")
         layout.addWidget(line)
+
         tag_container = QWidget()
         tag_container.setStyleSheet("background-color: #252525;")
         tag_layout = QVBoxLayout(tag_container)
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
-        self.tag_area = InteractiveTagArea()
-        self.tag_area.setEnabled(False)
-        self.tag_area.sig_popup_requested.connect(self.show_tag_popup)
-        self.tag_area.sig_tags_submitted.connect(self._on_tags_submitted)
-        tag_layout.addWidget(self.tag_area)
 
+        # Interactive input area
+        self.tag_input_area = InteractiveTagArea()
+        self.tag_input_area.setEnabled(False)
+        self.tag_input_area.sig_tags_submitted.connect(self.handle_tags_submitted)
+        tag_layout.addWidget(self.tag_input_area)
+
+        # Label for the saved tags section
         lbl_tag_title = QLabel("已保存的标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
         tag_layout.addWidget(lbl_tag_title)
 
+        # Scroll area for displaying saved tags
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tag_widget_content = QWidget()
-        self.tag_widget_content.setStyleSheet("background: transparent;")
-        self.flow_layout = TagFlowLayout(self.tag_widget_content, margin=0, hSpacing=6, vSpacing=6)
-        scroll.setWidget(self.tag_widget_content)
+        self.saved_tags_widget = QWidget()
+        self.saved_tags_widget.setStyleSheet("background: transparent;")
+        self.saved_tags_layout = TagFlowLayout(self.saved_tags_widget, margin=0, hSpacing=6, vSpacing=6)
+        scroll.setWidget(self.saved_tags_widget)
         tag_layout.addWidget(scroll, 1)
+
         layout.addWidget(tag_container, 1)
         self.copy_btn = FloatingCopyBtn(self)
 
-    def show_tag_popup(self):
-        if not self.isEnabled() or not self.current_file_path: return
-        if self.popup and self.popup.isVisible(): return
-
-        # Pass the currently staged tags from the input area to the popup
-        staged_tags = self.tag_area.get_tags()
-        self.popup = TagSelectionPopup(staged_tags, self)
-        self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
-
-        global_pos = self.tag_area.mapToGlobal(QPoint(0, self.tag_area.height() + 2))
-        self.popup.move(global_pos)
-        self.popup.show()
-        self.popup.search_input.setFocus()
-        self.popup.search_input.selectAll()
-
-    def handle_tag_selection_changed(self, new_tags_list):
-        # This now only updates the temporary tags in the input area (the "shopping cart")
-        self.tag_area.set_tags(new_tags_list)
-
-    def _on_tags_submitted(self, submitted_tags):
+    def handle_tags_submitted(self, submitted_tags):
         if not self.current_file_path: return
 
-        # Add the newly submitted tags to the existing ones
+        # Determine which tags are new
         tags_to_add = list(set(submitted_tags) - set(self.current_tags))
+
         if not tags_to_add:
-            self.tag_area.set_tags([]) # Clear input even if no new tags
+            # Even if no new tags, we might have cleared the input, so reset it
+            self.tag_input_area.set_staged_tags([])
             return
 
+        # Use the service to add the new tags
         updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
 
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            # This will re-render everything, including the saved tags list
+            self.update_info(filename, updated_info)
+
+    def request_remove_tag_from_chip(self, tag_name):
+        if not self.current_file_path: return
+
+        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
         if updated_info:
             filename = os.path.basename(self.current_file_path)
             self.update_info(filename, updated_info)
@@ -345,9 +344,9 @@ class MetadataPanel(QWidget):
         self.table.clearContents()
         self.current_file_path = None
         self.current_tags = []
-        self.render_tags()
-        self.tag_area.set_tags([])
-        self.tag_area.setEnabled(False)
+        self.render_saved_tags()
+        self.tag_input_area.set_staged_tags([])
+        self.tag_input_area.setEnabled(False)
 
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
@@ -356,6 +355,7 @@ class MetadataPanel(QWidget):
     def update_info(self, filename, info):
         self.copy_btn.hide()
         
+        # --- Populate metadata table ---
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
@@ -371,32 +371,35 @@ class MetadataPanel(QWidget):
         r = info.get("rating", 0)
         row(7, "评级", "★" * r if r else "无")
 
+        # --- Update and render saved tags ---
         self.current_tags = info.get("tags", [])
-        self.render_tags()
+        self.render_saved_tags()
 
-        self.tag_area.set_tags([])
-        self.tag_area.setEnabled(True)
+        # --- Reset and enable the input area ---
+        self.tag_input_area.set_staged_tags([])
+        self.tag_input_area.setEnabled(True)
 
     def set_current_file(self, full_path):
         self.current_file_path = full_path
 
-    def render_tags(self):
-        while self.flow_layout.count():
-            item = self.flow_layout.takeAt(0)
+    def render_saved_tags(self):
+        # Clear previous tags
+        while self.saved_tags_layout.count():
+            item = self.saved_tags_layout.takeAt(0)
             widget = item.widget()
             if widget: widget.deleteLater()
-        for tag in self.current_tags:
-            chip = TagChip(tag)
-            chip.sig_remove.connect(self.request_remove_tag_from_chip)
-            self.flow_layout.addWidget(chip)
 
-    def request_remove_tag_from_chip(self, tag_name):
-        if not self.current_file_path: return
-
-        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
-        if updated_info:
-            filename = os.path.basename(self.current_file_path)
-            self.update_info(filename, updated_info)
+        # Add current tags
+        if not self.current_tags:
+            placeholder = QLabel("无标签")
+            placeholder.setStyleSheet("color: #666; font-style: italic;")
+            self.saved_tags_layout.addWidget(placeholder)
+        else:
+            for tag in self.current_tags:
+                chip = TagChip(tag)
+                # Allow removing saved tags by clicking their 'x' button
+                chip.sig_remove.connect(self.request_remove_tag_from_chip)
+                self.saved_tags_layout.addWidget(chip)
 
 class FolderPanel(QWidget):
     sig_add_to_favorites = pyqtSignal(str)

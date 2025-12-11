@@ -681,8 +681,6 @@ class AssetManagerWindow(QMainWindow):
         self.panel_folder.sig_add_to_favorites.connect(self.panel_fav.list_view.add_favorite)
         self.panel_folder.sig_set_auto_tag.connect(self.open_auto_tag_dialog)
 
-        self.panel_meta.sig_add_tag.connect(self.handle_add_tag_request)
-        self.panel_meta.sig_remove_tag.connect(self.handle_remove_tag_request)
         self.panel_filter.sig_filter_changed.connect(self.proxy_model.set_filter_conditions)
 
     def on_view_selection_changed(self, selected, deselected):
@@ -700,26 +698,6 @@ class AssetManagerWindow(QMainWindow):
             current_index = selection_model.currentIndex()
             if current_index.isValid():
                 self.on_asset_clicked(current_index)
-
-    def handle_add_tag_request(self, full_path, tag_name):
-        self.pause_monitoring()
-        try:
-            updated_info = TagService.add_tag(full_path, tag_name)
-            if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
-        finally:
-            self.resume_monitoring()
-
-    def handle_remove_tag_request(self, full_path, tag_name):
-        self.pause_monitoring()
-        try:
-            updated_info = TagService.remove_tag(full_path, tag_name)
-            if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
-        finally:
-            self.resume_monitoring()
 
     def on_favorite_clicked(self, path):
         path = str(path).strip()
