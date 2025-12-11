@@ -114,12 +114,3 @@ class AssetModel(QStandardItemModel):
         for item in pinned_files: self.appendRow(item)
         for item in normal_folders: self.appendRow(item)
         for item in normal_files: self.appendRow(item)
-
-    def find_index_by_path(self, file_path):
-        """Find the QModelIndex for a given full file path."""
-        for row in range(self.rowCount()):
-            index = self.index(row, 0)
-            path_in_model = self.data(index, self.ROLE_FULL_PATH)
-            if path_in_model == file_path:
-                return index
-        return Qt.QModelIndex()

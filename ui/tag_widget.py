@@ -202,6 +202,8 @@ class TagGridItem(QFrame):
 # ==================== 3. 弹窗容器 (Popup) ====================
 class TagSelectionPopup(QDialog):
     sig_tags_changed = pyqtSignal(list) 
+    # New signal for single tag selection to fill the line edit
+    sig_tag_selected = pyqtSignal(str)
 
     def __init__(self, current_tags, parent=None):
         super().__init__(parent)
@@ -411,7 +413,8 @@ class TagSelectionPopup(QDialog):
             
             is_selected = tag in self.selected_tags
             item = TagGridItem(tag, is_recent, is_selected)
-            item.sig_clicked.connect(self.toggle_tag)
+            # CRITICAL CHANGE: Connect to the new method instead of toggle_tag
+            item.sig_clicked.connect(self.select_tag_for_input)
             
             grid.addWidget(item, row, col)
             self.nav_items.append(item)
@@ -420,6 +423,10 @@ class TagSelectionPopup(QDialog):
 
     def on_search(self, text):
         self.refresh_ui(text)
+
+    def select_tag_for_input(self, tag):
+        """Emits a signal to indicate a tag was selected for input."""
+        self.sig_tag_selected.emit(tag)
 
     def toggle_tag(self, tag):
         if tag in self.selected_tags:
@@ -489,30 +496,23 @@ class TagInputArea(QFrame):
         super().mousePressEvent(event)
 
     def set_tags(self, tags_list):
-        # Ensure tags are unique and sorted for consistent display
-        self.tags = sorted(list(set(tags_list)))
+        self.tags = list(tags_list)
         self.render()
 
     def get_tags(self):
         return self.tags
 
     def render(self):
-        # --- CRITICAL FIX ---
-        # Clear only the tag chips, not the placeholder label
-        for i in reversed(range(self.layout.count())):
-            item = self.layout.itemAt(i)
-            widget = item.widget()
-            # Check if the widget is a TagChip before deleting
-            if widget and isinstance(widget, TagChip):
-                # Remove from layout and delete the widget
-                self.layout.takeAt(i)
-                widget.deleteLater()
+        while self.layout.count():
+            item = self.layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
         if not self.tags:
+            self.layout.addWidget(self.lbl_placeholder)
             self.lbl_placeholder.show()
         else:
             self.lbl_placeholder.hide()
-            # Re-add the sorted tags
             for tag in self.tags:
                 chip = TagChip(tag)
                 chip.sig_remove.connect(self.remove_tag)
