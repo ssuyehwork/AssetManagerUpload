@@ -92,20 +92,21 @@ class TagChip(QFrame):
         layout.addWidget(lbl)
         
         btn_close = QPushButton("×")
+        btn_close.setObjectName("TagChipCloseBtn")
         btn_close.setFixedSize(20, 20)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_close.setStyleSheet("""
-            QPushButton { 
+            QPushButton#TagChipCloseBtn {
                 border: none; 
                 background: transparent; 
                 color: #AAAAAA;          
                 font-family: Arial; 
                 font-size: 18px;
                 font-weight: normal;
-                padding-bottom: 3px;
-                margin: 0px;
+                padding: 0;
+                margin: 0;
             }
-            QPushButton:hover { 
+            QPushButton#TagChipCloseBtn:hover {
                 color: #FF5555;       
             }
         """)
