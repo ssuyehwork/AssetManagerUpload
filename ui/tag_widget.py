@@ -638,17 +638,19 @@ class InteractiveTagArea(QFrame):
             self._render_tags()
 
     def _render_tags(self):
-        for i in reversed(range(self.layout.count())):
-            item = self.layout.itemAt(i)
-            widget = item.widget()
-            if widget and widget != self.line_edit:
-                widget.deleteLater()
+        # 1. Clear layout completely, but keep a reference to the line edit
+        while self.layout.count() > 0:
+            item = self.layout.takeAt(0)
+            if item.widget() and item.widget() != self.line_edit:
+                item.widget().deleteLater()
 
+        # 2. Re-add widgets in the correct order
         for tag in self.tags:
             chip = TagChip(tag)
             chip.sig_remove.connect(self.remove_tag)
-            self.layout.insertWidget(self.layout.count() - 1, chip)
+            self.layout.addWidget(chip)
 
+        self.layout.addWidget(self.line_edit)
         self.line_edit.clear()
 
     def submit_tags(self):

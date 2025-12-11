@@ -286,15 +286,23 @@ class MetadataPanel(QWidget):
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
 
-        lbl_tag_title = QLabel("标签")
-        lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px;")
-        tag_layout.addWidget(lbl_tag_title)
-
         self.tag_area = InteractiveTagArea()
         self.tag_area.setEnabled(False)
         self.tag_area.sig_tags_submitted.connect(self._on_tags_submitted)
         tag_layout.addWidget(self.tag_area)
 
+        lbl_tag_title = QLabel("已保存的标签")
+        lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
+        tag_layout.addWidget(lbl_tag_title)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.tag_widget_content = QWidget()
+        self.tag_widget_content.setStyleSheet("background: transparent;")
+        self.flow_layout = TagFlowLayout(self.tag_widget_content, margin=0, hSpacing=6, vSpacing=6)
+        scroll.setWidget(self.tag_widget_content)
+        tag_layout.addWidget(scroll, 1)
         layout.addWidget(tag_container, 1)
         self.copy_btn = FloatingCopyBtn(self)
 
@@ -302,32 +310,30 @@ class MetadataPanel(QWidget):
         if not self.current_file_path:
             return
 
-        # Fetch the most current tags from the data source
+        # Fetch the most current tags to compare against
         current_info = TagService.get_tags(self.current_file_path)
         original_tags = set(current_info.get("tags", []))
-        new_tags = set(submitted_tags)
 
-        tags_to_add = list(new_tags - original_tags)
-        tags_to_remove = list(original_tags - new_tags)
+        # Combine submitted tags with already existing tags for the final state
+        final_tags = original_tags.union(set(submitted_tags))
 
-        updated_info = None
-        if tags_to_add:
-            updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
+        tags_to_add = list(final_tags - original_tags)
 
-        if tags_to_remove:
-            updated_info = TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
+        if not tags_to_add:
+            self.tag_area.set_tags([]) # Clear input on enter even if no new tags
+            return
+
+        updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
 
         if updated_info:
             filename = os.path.basename(self.current_file_path)
             self.update_info(filename, updated_info)
-        elif not tags_to_add and not tags_to_remove:
-            # If no changes, still refresh to clear any text in the line edit
-            self.tag_area.set_tags(list(original_tags))
-
 
     def clear_info(self):
         self.table.clearContents()
         self.current_file_path = None
+        self.current_tags = []
+        self.render_tags()
         self.tag_area.set_tags([])
         self.tag_area.setEnabled(False)
 
@@ -338,6 +344,7 @@ class MetadataPanel(QWidget):
     def update_info(self, filename, info):
         self.copy_btn.hide()
         self.tag_area.setEnabled(True)
+        self.tag_area.set_tags([]) # Clear pending tags
         
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
@@ -346,19 +353,37 @@ class MetadataPanel(QWidget):
         ftype = info.get("type", "")
         row(1, "类型", "文件夹" if ftype == "FOLDER" else (info.get("ext", "").upper().replace(".", "") + " 文件"))
         sz = info.get("size", 0)
-        row(2, "大小", f"{sz} B" if sz < 1024 else (f"{sz/1024:.1f} KB" if sz < 1048576 else f"{sz/1048576:.1f} MB"))
+        row(2, "大小", f"{sz} B" if sz < 1024 else (f"{sz/1024:.1f} KB" if sz < 1048576 else f"{sz/1024:.1f} MB"))
         row(3, "修改时间", format_time(info.get("mtime")))
         row(4, "创建时间", format_time(info.get("ctime")))
         row(5, "上次访问", format_time(info.get("atime")))
         row(6, "访问次数", f"{info.get('view_count', 0)} 次")
         r = info.get("rating", 0)
         row(7, "评级", "★" * r if r else "无")
-
-        current_tags = info.get("tags", [])
-        self.tag_area.set_tags(current_tags)
+        self.current_tags = info.get("tags", [])
+        self.render_tags()
 
     def set_current_file(self, full_path):
         self.current_file_path = full_path
+
+    def render_tags(self):
+        # Renders the saved tags in the lower display area
+        while self.flow_layout.count():
+            item = self.flow_layout.takeAt(0)
+            widget = item.widget()
+            if widget: widget.deleteLater()
+        for tag in self.current_tags:
+            chip = TagChip(tag)
+            chip.sig_remove.connect(self.request_remove_tag_from_chip)
+            self.flow_layout.addWidget(chip)
+
+    def request_remove_tag_from_chip(self, tag_name):
+        if not self.current_file_path: return
+
+        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
 class FolderPanel(QWidget):
     sig_add_to_favorites = pyqtSignal(str)
