@@ -202,8 +202,6 @@ class TagGridItem(QFrame):
 # ==================== 3. 弹窗容器 (Popup) ====================
 class TagSelectionPopup(QDialog):
     sig_tags_changed = pyqtSignal(list) 
-    # New signal for single tag selection to fill the line edit
-    sig_tag_selected = pyqtSignal(str)
 
     def __init__(self, current_tags, parent=None):
         super().__init__(parent)
@@ -234,6 +232,7 @@ class TagSelectionPopup(QDialog):
         self.load_data()
         
         self.search_input.installEventFilter(self)
+        self.installEventFilter(self)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -285,6 +284,12 @@ class TagSelectionPopup(QDialog):
         layout.addWidget(footer)
 
     def eventFilter(self, source, event):
+        # 1. 窗口失去焦点时自动关闭 (优雅)
+        if event.type() == QEvent.Type.WindowDeactivate:
+            self.accept()
+            return True
+
+        # 2. 键盘导航/操作
         if source == self.search_input and event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Down:
@@ -297,8 +302,9 @@ class TagSelectionPopup(QDialog):
                 self.trigger_current_selection()
                 return True
             elif key == Qt.Key.Key_Escape:
-                self.close()
+                self.accept() # 使用 accept() 替代 close()
                 return True
+
         return super().eventFilter(source, event)
 
     def move_selection(self, step):
@@ -413,8 +419,7 @@ class TagSelectionPopup(QDialog):
             
             is_selected = tag in self.selected_tags
             item = TagGridItem(tag, is_recent, is_selected)
-            # CRITICAL CHANGE: Connect to the new method instead of toggle_tag
-            item.sig_clicked.connect(self.select_tag_for_input)
+            item.sig_clicked.connect(self.toggle_tag)
             
             grid.addWidget(item, row, col)
             self.nav_items.append(item)
@@ -423,10 +428,6 @@ class TagSelectionPopup(QDialog):
 
     def on_search(self, text):
         self.refresh_ui(text)
-
-    def select_tag_for_input(self, tag):
-        """Emits a signal to indicate a tag was selected for input."""
-        self.sig_tag_selected.emit(tag)
 
     def toggle_tag(self, tag):
         if tag in self.selected_tags:
@@ -465,7 +466,7 @@ class TagInputArea(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tags = []
-        self.popup = None
+        self._popup = None # 【核心修复】使用私有变量管理唯一的弹窗实例
         
         # 【修改】最小高度从 52 减少到 47 (减少5px)
         self.setMinimumHeight(47) 
@@ -527,18 +528,27 @@ class TagInputArea(QFrame):
             
             self.sig_tags_changed.emit(self.tags)
             
-            if self.popup and self.popup.isVisible():
-                self.popup.selected_tags = set(self.tags)
-                self.popup.refresh_ui(self.popup.search_input.text())
+            if self._popup and self._popup.isVisible():
+                self._popup.selected_tags = set(self.tags)
+                self._popup.refresh_ui(self._popup.search_input.text())
 
     def show_popup(self):
-        self.popup = TagSelectionPopup(self.tags, self)
-        self.popup.sig_tags_changed.connect(self.on_popup_tags_changed)
+        if not self._popup:
+            self._popup = TagSelectionPopup(self.tags, self)
+            self._popup.sig_tags_changed.connect(self.on_popup_tags_changed)
+
+            # 【核心修复】确保弹窗在父级销毁时也被销毁，防止悬空引用
+            self.destroyed.connect(self._popup.deleteLater)
+
+        # 每次打开时都更新弹窗内的标签列表
+        self._popup.selected_tags = set(self.tags)
+        self._popup.refresh_ui()
         
         global_pos = self.mapToGlobal(QPoint(0, self.height() + 4))
-        self.popup.move(global_pos)
-        self.popup.show()
-        self.popup.search_input.setFocus()
+        self._popup.move(global_pos)
+        self._popup.show()
+        self._popup.activateWindow()
+        self._popup.search_input.setFocus()
 
     def on_popup_tags_changed(self, new_tags):
         self.tags = new_tags

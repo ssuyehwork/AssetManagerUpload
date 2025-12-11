@@ -681,9 +681,38 @@ class AssetManagerWindow(QMainWindow):
         self.panel_folder.sig_add_to_favorites.connect(self.panel_fav.list_view.add_favorite)
         self.panel_folder.sig_set_auto_tag.connect(self.open_auto_tag_dialog)
 
-        self.panel_meta.sig_add_tag.connect(self.handle_add_tag_request)
-        self.panel_meta.sig_remove_tag.connect(self.handle_remove_tag_request)
+        # 【核心数据流】连接元数据面板的新信号到主窗口的中央处理器
+        self.panel_meta.sig_tags_changed_by_user.connect(self.handle_tags_changed_by_user)
         self.panel_filter.sig_filter_changed.connect(self.proxy_model.set_filter_conditions)
+
+    def handle_tags_changed_by_user(self, file_path, new_tags):
+        """
+        【核心数据流】这是处理所有标签变更的唯一入口点。
+        它负责调用服务、处理数据，然后命令UI更新。
+        """
+        self.pause_monitoring()
+        try:
+            # 1. 获取当前元数据以计算差异
+            current_meta = LocalStoreService.get_file_meta(os.path.dirname(file_path), os.path.basename(file_path))
+            original_tags = set(current_meta.get("tags", []))
+
+            # 2. 计算需要添加和删除的标签
+            tags_to_add = list(set(new_tags) - original_tags)
+            tags_to_remove = list(original_tags - set(new_tags))
+
+            # 3. 分别调用服务执行操作
+            updated_info = None
+            if tags_to_add:
+                updated_info = TagService.add_tags_batch(file_path, tags_to_add)
+            elif tags_to_remove:
+                updated_info = TagService.remove_tags_batch(file_path, tags_to_remove)
+
+            # 4. 如果有更新，则命令UI刷新
+            if updated_info:
+                filename = os.path.basename(file_path)
+                self.panel_meta.update_info(filename, updated_info)
+        finally:
+            self.resume_monitoring()
 
     def on_view_selection_changed(self, selected, deselected):
         """当视图中的选择发生变化时调用。"""
@@ -700,26 +729,6 @@ class AssetManagerWindow(QMainWindow):
             current_index = selection_model.currentIndex()
             if current_index.isValid():
                 self.on_asset_clicked(current_index)
-
-    def handle_add_tag_request(self, full_path, tag_name):
-        self.pause_monitoring()
-        try:
-            updated_info = TagService.add_tag(full_path, tag_name)
-            if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
-        finally:
-            self.resume_monitoring()
-
-    def handle_remove_tag_request(self, full_path, tag_name):
-        self.pause_monitoring()
-        try:
-            updated_info = TagService.remove_tag(full_path, tag_name)
-            if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
-        finally:
-            self.resume_monitoring()
 
     def on_favorite_clicked(self, path):
         path = str(path).strip()
@@ -742,7 +751,7 @@ class AssetManagerWindow(QMainWindow):
         full_path = self.asset_model.data(source_index, AssetModel.ROLE_FULL_PATH)
         filename = self.asset_model.data(source_index, Qt.ItemDataRole.DisplayRole)
         if info: 
-            self.panel_meta.set_current_file(full_path)
+            info['full_path'] = full_path # 将完整路径添加到 info 字典中
             self.panel_meta.update_info(filename, info)
 
     def on_asset_double_clicked(self, index):
