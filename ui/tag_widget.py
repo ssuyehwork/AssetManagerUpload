@@ -489,23 +489,30 @@ class TagInputArea(QFrame):
         super().mousePressEvent(event)
 
     def set_tags(self, tags_list):
-        self.tags = list(tags_list)
+        # Ensure tags are unique and sorted for consistent display
+        self.tags = sorted(list(set(tags_list)))
         self.render()
 
     def get_tags(self):
         return self.tags
 
     def render(self):
-        while self.layout.count():
-            item = self.layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+        # --- CRITICAL FIX ---
+        # Clear only the tag chips, not the placeholder label
+        for i in reversed(range(self.layout.count())):
+            item = self.layout.itemAt(i)
+            widget = item.widget()
+            # Check if the widget is a TagChip before deleting
+            if widget and isinstance(widget, TagChip):
+                # Remove from layout and delete the widget
+                self.layout.takeAt(i)
+                widget.deleteLater()
 
         if not self.tags:
-            self.layout.addWidget(self.lbl_placeholder)
             self.lbl_placeholder.show()
         else:
             self.lbl_placeholder.hide()
+            # Re-add the sorted tags
             for tag in self.tags:
                 chip = TagChip(tag)
                 chip.sig_remove.connect(self.remove_tag)

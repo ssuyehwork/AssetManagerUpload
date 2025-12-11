@@ -299,7 +299,8 @@ class MetadataPanel(QWidget):
         self.tag_input_area.setEnabled(False)
         # Connect the internal widget's signal to our new emitter method
         self.tag_input_area.sig_tags_changed.connect(self._emit_tags_updated)
-        tag_layout.addWidget(self.tag_input_area, 1)
+        tag_layout.addWidget(self.tag_input_area) # Remove stretch factor
+        tag_layout.addStretch(1) # Add stretch below the widget
 
         layout.addWidget(tag_container, 1)
         # --- End of Tag Area Refactor ---
