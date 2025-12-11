@@ -22,10 +22,9 @@ except ImportError:
     def get_favorites(): return []
 
 from services.preference_service import PreferenceService
-from ui.tag_suggestion import TagSuggestPopup
+# 【核心修复】从 tag_widget 导入正确的弹窗
+from ui.tag_widget import TagSelectionPopup, TagChip
 from services.tag_service import TagService
-# 强制从正确的文件导入 TagChip
-from ui.tag_widget import TagChip
 
 # ==================== TagFlowLayout ====================
 class TagFlowLayout(QLayout):
@@ -329,15 +328,15 @@ class MetadataPanel(QWidget):
         if not self.isEnabled() or not self.current_file_path: return
         if self.popup and self.popup.isVisible(): return
 
-        self.popup = TagSuggestPopup(self.current_tags, self)
-        self.popup.sig_selection_changed.connect(self.handle_tag_selection_changed)
+        self.popup = TagSelectionPopup(self.current_tags, self)
+        self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
 
         input_box = self.txt_tag_input
-        self.popup.setFixedWidth(input_box.width())
-
         global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
         self.popup.move(global_pos)
         self.popup.show()
+        self.popup.search_input.setFocus()
+        self.popup.search_input.selectAll()
 
     def handle_tag_selection_changed(self, new_tags_list):
         if not self.current_file_path: return
@@ -348,10 +347,11 @@ class MetadataPanel(QWidget):
         tags_to_add = list(new_tags - original_tags)
         tags_to_remove = list(original_tags - new_tags)
 
+        # 核心Bug修复：分离添加和删除操作，因为它们是互斥的
         updated_info = None
         if tags_to_add:
             updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
-        if tags_to_remove:
+        elif tags_to_remove:
             updated_info = TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
 
         if updated_info:
