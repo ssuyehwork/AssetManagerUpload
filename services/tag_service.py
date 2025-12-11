@@ -86,3 +86,31 @@ class TagService:
             AssetService.update_tags(full_path, new_tags)
 
         return updated_info
+
+    @staticmethod
+    def remove_tags_batch(full_path, tag_list):
+        if not full_path or not os.path.exists(full_path) or not tag_list:
+            return None
+
+        folder = os.path.dirname(full_path)
+        filename = os.path.basename(full_path)
+
+        def update_logic(old_tags):
+            if not isinstance(old_tags, list):
+                return []
+
+            tags_to_remove_set = set(tag_list)
+
+            # 使用列表推导式过滤掉要删除的标签
+            new_tags_list = [t for t in old_tags if t not in tags_to_remove_set]
+
+            return new_tags_list
+
+        updated_info = LocalStoreService.update_file_attr(folder, filename, "tags", update_logic)
+
+        if updated_info:
+            new_tags = updated_info.get("tags", [])
+            # 【核心】同步到数据库
+            AssetService.update_tags(full_path, new_tags)
+
+        return updated_info

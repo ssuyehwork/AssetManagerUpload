@@ -21,8 +21,9 @@ except ImportError:
     def remove_favorite(path): pass
     def get_favorites(): return []
 
-from ui.tag_suggestion import TagSuggestPopup
 from services.preference_service import PreferenceService
+from ui.tag_suggestion import TagSuggestPopup
+from services.tag_service import TagService
 
 # ==================== TagFlowLayout ====================
 class TagFlowLayout(QLayout):
@@ -329,9 +330,9 @@ class MetadataPanel(QWidget):
                 color: #666;
             }
         """)
-        self.txt_tag_input.returnPressed.connect(self.request_add_tag)
+        self.txt_tag_input.returnPressed.connect(self.request_add_tag_from_input)
         self.txt_tag_input.clicked.connect(self.show_tag_popup)
-        self.txt_tag_input.setEnabled(False)  # 默认禁用
+        self.txt_tag_input.setEnabled(False)
         tag_layout.addWidget(self.txt_tag_input)
         lbl_tag_title = QLabel("标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
@@ -349,13 +350,12 @@ class MetadataPanel(QWidget):
         self.copy_btn = FloatingCopyBtn(self)
 
     def show_tag_popup(self):
-        if not self.isEnabled(): return
+        if not self.isEnabled() or not self.current_file_path: return
         if self.popup and self.popup.isVisible(): return
 
-        self.popup = TagSuggestPopup(self)
-        self.popup.sig_tag_selected.connect(self.add_suggested_tag)
+        self.popup = TagSuggestPopup(self.current_tags, self)
+        self.popup.sig_selection_changed.connect(self.handle_tag_selection_changed)
 
-        # 关键修复：使弹窗宽度与输入框一致
         input_box = self.txt_tag_input
         self.popup.setFixedWidth(input_box.width())
 
@@ -363,10 +363,24 @@ class MetadataPanel(QWidget):
         self.popup.move(global_pos)
         self.popup.show()
 
-    def add_suggested_tag(self, tag):
-        if self.current_file_path and os.path.exists(self.current_file_path):
-            self.sig_add_tag.emit(self.current_file_path, tag)
-            self.txt_tag_input.clear()
+    def handle_tag_selection_changed(self, new_tags_list):
+        if not self.current_file_path: return
+
+        original_tags = set(self.current_tags)
+        new_tags = set(new_tags_list)
+
+        tags_to_add = list(new_tags - original_tags)
+        tags_to_remove = list(original_tags - new_tags)
+
+        updated_info = None
+        if tags_to_add:
+            updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
+        if tags_to_remove:
+            updated_info = TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
+
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
     def clear_info(self):
         self.table.clearContents()
@@ -380,10 +394,12 @@ class MetadataPanel(QWidget):
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
         else: self.copy_btn.hide()
+
     def update_info(self, filename, info):
         self.copy_btn.hide()
         self.txt_tag_input.setEnabled(True)
-        self.txt_tag_input.setPlaceholderText("点击选择或输入标签, 按回车添加...")
+        self.txt_tag_input.setPlaceholderText("点击选择或输入标签...")
+
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
@@ -400,9 +416,11 @@ class MetadataPanel(QWidget):
         row(7, "评级", "★" * r if r else "无")
         self.current_tags = info.get("tags", [])
         self.render_tags()
+
     def set_current_file(self, full_path):
         self.current_file_path = full_path
         self.txt_tag_input.clear()
+
     def render_tags(self):
         while self.flow_layout.count():
             item = self.flow_layout.takeAt(0)
@@ -410,17 +428,27 @@ class MetadataPanel(QWidget):
             if widget: widget.deleteLater()
         for tag in self.current_tags:
             chip = TagChip(tag)
-            chip.sig_remove.connect(self.request_remove_tag)
+            chip.sig_remove.connect(self.request_remove_tag_from_chip)
             self.flow_layout.addWidget(chip)
-    def request_add_tag(self):
+
+    def request_add_tag_from_input(self):
         if not self.current_file_path or not os.path.exists(self.current_file_path): return
         text = self.txt_tag_input.text().strip()
         if not text: return
-        self.sig_add_tag.emit(self.current_file_path, text)
+
+        updated_info = TagService.add_tag(self.current_file_path, text)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
         self.txt_tag_input.clear()
-    def request_remove_tag(self, tag_name):
+
+    def request_remove_tag_from_chip(self, tag_name):
         if not self.current_file_path: return
-        self.sig_remove_tag.emit(self.current_file_path, tag_name)
+
+        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
 class FolderPanel(QWidget):
     sig_add_to_favorites = pyqtSignal(str)
