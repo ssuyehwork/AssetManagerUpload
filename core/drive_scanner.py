@@ -1,5 +1,6 @@
 import subprocess
 import re
+import sys
 
 class WindowsDriveScanner:
     @staticmethod
@@ -9,6 +10,9 @@ class WindowsDriveScanner:
         使用 wmic logicaldisk 获取卷序列号，这个是格式化时生成的唯一ID，
         比物理出厂序列号更适合作为分区的唯一标识。
         """
+        if sys.platform != "win32":
+            return {}
+
         drives = {}
         try:
             # 执行 CMD 命令获取盘符和序列号

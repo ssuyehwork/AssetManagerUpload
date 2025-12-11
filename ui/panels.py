@@ -24,6 +24,8 @@ except ImportError:
 from services.preference_service import PreferenceService
 from ui.tag_suggestion import TagSuggestPopup
 from services.tag_service import TagService
+# 强制从正确的文件导入 TagChip
+from ui.tag_widget import TagChip
 
 # ==================== TagFlowLayout ====================
 class TagFlowLayout(QLayout):
@@ -75,32 +77,6 @@ class TagFlowLayout(QLayout):
             x = nextX
             lineHeight = max(lineHeight, item.sizeHint().height())
         return y + lineHeight - rect.y() + bottom
-
-# ==================== TagChip ====================
-class TagChip(QFrame):
-    sig_remove = pyqtSignal(str)
-    def __init__(self, text, parent=None):
-        super().__init__(parent)
-        self.text = text
-        self.setStyleSheet("""
-            QFrame { background-color: #333333; border: 1px solid #444; border-radius: 4px; }
-            QFrame:hover { background-color: #3e3e3e; border: 1px solid #555; }
-        """)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 2, 4, 2)
-        layout.setSpacing(6)
-        lbl = QLabel(text)
-        lbl.setStyleSheet("border: none; background: transparent; color: #ddd;")
-        layout.addWidget(lbl)
-        btn_close = QPushButton("×")
-        btn_close.setFixedSize(16, 16)
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setStyleSheet("""
-            QPushButton { border: none; background: transparent; color: #777; font-weight: bold; padding-bottom: 2px; }
-            QPushButton:hover { color: #ff6b6b; }
-        """)
-        btn_close.clicked.connect(lambda: self.sig_remove.emit(self.text))
-        layout.addWidget(btn_close)
 
 # ==================== ClickableLineEdit (for tag input) ====================
 class ClickableLineEdit(QLineEdit):
