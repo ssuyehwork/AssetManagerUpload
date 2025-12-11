@@ -574,6 +574,8 @@ class AssetManagerWindow(QMainWindow):
             view.customContextMenuRequested.connect(self.show_context_menu)
             view.clicked.connect(self.on_asset_clicked)
             view.doubleClicked.connect(self.on_asset_double_clicked)
+            # 关键：连接选择变化信号
+            view.selectionModel().selectionChanged.connect(self.on_view_selection_changed)
             view.viewport().installEventFilter(self)
         self.grid_view = QListView()
         self.grid_view.setViewMode(QListView.ViewMode.IconMode)
@@ -682,6 +684,22 @@ class AssetManagerWindow(QMainWindow):
         self.panel_meta.sig_add_tag.connect(self.handle_add_tag_request)
         self.panel_meta.sig_remove_tag.connect(self.handle_remove_tag_request)
         self.panel_filter.sig_filter_changed.connect(self.proxy_model.set_filter_conditions)
+
+    def on_view_selection_changed(self, selected, deselected):
+        """当视图中的选择发生变化时调用。"""
+        current_view = self.central_stack.currentWidget()
+        if not current_view: return
+
+        selection_model = current_view.selectionModel()
+        if not selection_model.hasSelection():
+            # 如果没有项目被选中，则清空元数据面板
+            self.panel_meta.clear_info()
+        else:
+            # 否则，像正常点击一样更新信息
+            # （on_asset_clicked 会处理多选的情况，只更新当前活动项）
+            current_index = selection_model.currentIndex()
+            if current_index.isValid():
+                self.on_asset_clicked(current_index)
 
     def handle_add_tag_request(self, full_path, tag_name):
         self.pause_monitoring()

@@ -16,7 +16,7 @@ class TagSuggestPopup(QDialog):
         super().__init__(parent)
         # 窗口设置
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setFixedSize(320, 300)
+        self.setFixedHeight(260) # 只设置固定高度，宽度将由外部控制
 
         # 样式
         self.setStyleSheet("""
@@ -59,7 +59,8 @@ class TagSuggestPopup(QDialog):
         content_widget = QWidget()
         content_widget.setStyleSheet("background: transparent;")
         self.content_layout = QVBoxLayout(content_widget)
-        self.content_layout.setContentsMargins(10, 10, 10, 10)
+        # 顶部留出更少空间
+        self.content_layout.setContentsMargins(10, 5, 10, 10)
         self.content_layout.setSpacing(8)
 
         scroll_area.setWidget(content_widget)
@@ -73,7 +74,6 @@ class TagSuggestPopup(QDialog):
 
     def load_tags(self):
         """加载并显示最近的标签。"""
-        # 从服务获取最多20个最近的标签
         recent_tags = PreferenceService.get_recent_tags()[:20]
 
         if not recent_tags:
@@ -91,37 +91,28 @@ class TagSuggestPopup(QDialog):
         grid.setVerticalSpacing(2)
         grid.setHorizontalSpacing(8)
 
-        # 添加标题
-        lbl_title = QLabel(f"最近使用 ({len(recent_tags)})")
-        lbl_title.setStyleSheet("color: #888; font-size: 11px; font-weight: bold; text-transform: uppercase; margin-bottom: 5px;")
-        self.content_layout.addWidget(lbl_title)
+        # 【UI优化】移除独立的标题 QLabel
 
         self.nav_items = []
         for i, tag in enumerate(recent_tags):
             row, col = i // 2, i % 2
-
-            # 复用 TagGridItem
             item = TagGridItem(tag, is_recent=True, is_selected=False)
             item.sig_clicked.connect(self.on_tag_clicked)
-
             grid.addWidget(item, row, col)
             self.nav_items.append(item)
 
         self.content_layout.addWidget(grid_widget)
         self.content_layout.addStretch()
 
-        # 默认高亮第一个
         if self.nav_items:
             self.current_nav_index = 0
             self.nav_items[0].set_highlight(True)
 
     def on_tag_clicked(self, tag):
-        """当一个标签被点击时，发射信号并关闭窗口。"""
         self.sig_tag_selected.emit(tag)
         self.close()
 
     def eventFilter(self, source, event):
-        """全局事件过滤器，用于处理键盘导航。"""
         if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key in [Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape]:
@@ -133,32 +124,26 @@ class TagSuggestPopup(QDialog):
                     self.trigger_current_selection()
                 elif key == Qt.Key.Key_Escape:
                     self.close()
-                return True # 事件已处理
+                return True
 
-        # 捕获外部点击事件
         if event.type() == QEvent.Type.WindowDeactivate:
             self.close()
 
         return super().eventFilter(source, event)
 
     def move_selection(self, step):
-        """根据步长移动高亮选择。"""
         count = len(self.nav_items)
         if count == 0: return
 
-        # 取消当前高亮
         if 0 <= self.current_nav_index < count:
             self.nav_items[self.current_nav_index].set_highlight(False)
 
-        # 计算新索引
         self.current_nav_index = (self.current_nav_index + step + count) % count
 
-        # 设置新高亮
         target = self.nav_items[self.current_nav_index]
         target.set_highlight(True)
 
     def trigger_current_selection(self):
-        """触发（选择）当前高亮的项。"""
         if 0 <= self.current_nav_index < len(self.nav_items):
             item = self.nav_items[self.current_nav_index]
             self.on_tag_clicked(item.text_val)

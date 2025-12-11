@@ -281,7 +281,7 @@ class MetadataPanel(QWidget):
         super().__init__(parent)
         self.current_file_path = None
         self.current_tags = []
-        self.popup = None  # Reference to the suggestion popup
+        self.popup = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -310,13 +310,28 @@ class MetadataPanel(QWidget):
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
         self.txt_tag_input = ClickableLineEdit()
-        self.txt_tag_input.setPlaceholderText("点击选择或输入标签, 按回车添加...")
+        self.txt_tag_input.setPlaceholderText("请先选择一个项目")
         self.txt_tag_input.setStyleSheet("""
-            QLineEdit { background-color: #1a1a1a; border: 1px solid #444; border-radius: 3px; padding: 4px 8px; color: #ddd; font-size: 12px; }
-            QLineEdit:focus { border: 1px solid #0078d7; background-color: #111; }
+            QLineEdit {
+                background-color: #1a1a1a;
+                border: 1px solid #444;
+                border-radius: 3px;
+                padding: 4px 8px;
+                color: #ddd;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #0078d7;
+                background-color: #111;
+            }
+            QLineEdit:disabled {
+                background-color: #2a2a2a;
+                color: #666;
+            }
         """)
         self.txt_tag_input.returnPressed.connect(self.request_add_tag)
         self.txt_tag_input.clicked.connect(self.show_tag_popup)
+        self.txt_tag_input.setEnabled(False)  # 默认禁用
         tag_layout.addWidget(self.txt_tag_input)
         lbl_tag_title = QLabel("标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
@@ -334,29 +349,41 @@ class MetadataPanel(QWidget):
         self.copy_btn = FloatingCopyBtn(self)
 
     def show_tag_popup(self):
-        """Creates, positions, and shows the tag suggestion popup."""
-        if self.popup and self.popup.isVisible():
-            return
+        if not self.isEnabled(): return
+        if self.popup and self.popup.isVisible(): return
 
         self.popup = TagSuggestPopup(self)
         self.popup.sig_tag_selected.connect(self.add_suggested_tag)
 
+        # 关键修复：使弹窗宽度与输入框一致
         input_box = self.txt_tag_input
+        self.popup.setFixedWidth(input_box.width())
+
         global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
         self.popup.move(global_pos)
         self.popup.show()
 
     def add_suggested_tag(self, tag):
-        """Handles adding a tag selected from the popup."""
         if self.current_file_path and os.path.exists(self.current_file_path):
             self.sig_add_tag.emit(self.current_file_path, tag)
             self.txt_tag_input.clear()
+
+    def clear_info(self):
+        self.table.clearContents()
+        self.current_file_path = None
+        self.current_tags = []
+        self.render_tags()
+        self.txt_tag_input.setText("")
+        self.txt_tag_input.setPlaceholderText("请先选择一个项目")
+        self.txt_tag_input.setEnabled(False)
 
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
         else: self.copy_btn.hide()
     def update_info(self, filename, info):
         self.copy_btn.hide()
+        self.txt_tag_input.setEnabled(True)
+        self.txt_tag_input.setPlaceholderText("点击选择或输入标签, 按回车添加...")
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
