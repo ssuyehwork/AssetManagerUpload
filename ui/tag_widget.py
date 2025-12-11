@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
-                             QGridLayout, QLayout, QSizePolicy)
+                             QGridLayout, QLayout, QSizePolicy, QWidgetItem)
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 
@@ -19,7 +19,14 @@ class FlowLayout(QLayout):
         # 初始化设置边距
         self.setContentsMargins(margin, margin, margin, margin)
 
-    def addItem(self, item): self._items.append(item)
+    def addItem(self, item):
+        self._items.append(item)
+
+    def insertWidget(self, index, widget):
+        item = QWidgetItem(widget)
+        self._items.insert(index, item)
+        self.addChildWidget(widget)
+
     def horizontalSpacing(self): return self._hSpace
     def verticalSpacing(self): return self._vSpace
     def expandingDirections(self): return Qt.Orientation(0)
@@ -203,11 +210,10 @@ class TagGridItem(QFrame):
 class TagSelectionPopup(QDialog):
     sig_tags_changed = pyqtSignal(list) 
 
-    def __init__(self, current_tags, width=360, search_visible=True, parent=None):
+    def __init__(self, current_tags, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setFixedSize(width, 420)
-        self.search_visible = search_visible
+        self.setFixedSize(360, 420)
         
         self.setStyleSheet("""
             QDialog { 
@@ -232,42 +238,37 @@ class TagSelectionPopup(QDialog):
         self.setup_ui()
         self.load_data()
         
-        if self.search_visible:
-            self.search_input.installEventFilter(self)
-        else:
-            self.installEventFilter(self)
+        self.search_input.installEventFilter(self)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.search_input = None
-        if self.search_visible:
-            search_frame = QFrame()
-            search_frame.setStyleSheet("border-bottom: 1px solid #333; background-color: #252526;")
-            search_layout = QHBoxLayout(search_frame)
-            search_layout.setContentsMargins(12, 12, 12, 12)
+        search_frame = QFrame()
+        search_frame.setStyleSheet("border-bottom: 1px solid #333; background-color: #252526;")
+        search_layout = QHBoxLayout(search_frame)
+        search_layout.setContentsMargins(12, 12, 12, 12)
 
-            self.search_input = QLineEdit()
-            self.search_input.setPlaceholderText("搜索或创建标签...")
-            self.search_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #3C3C3C;
-                    border: 1px solid #3C3C3C;
-                    border-radius: 2px;
-                    color: #CCCCCC;
-                    padding: 6px 8px;
-                    font-size: 13px;
-                }
-                QLineEdit:focus {
-                    border: 1px solid #0078D7;
-                    background-color: #1E1E1E;
-                }
-            """)
-            self.search_input.textChanged.connect(self.on_search)
-            search_layout.addWidget(self.search_input)
-            layout.addWidget(search_frame)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("搜索或创建标签...")
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #3C3C3C;
+                border: 1px solid #3C3C3C;
+                border-radius: 2px;
+                color: #CCCCCC;
+                padding: 6px 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #0078D7;
+                background-color: #1E1E1E;
+            }
+        """)
+        self.search_input.textChanged.connect(self.on_search)
+        search_layout.addWidget(self.search_input)
+        layout.addWidget(search_frame)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -289,24 +290,20 @@ class TagSelectionPopup(QDialog):
         layout.addWidget(footer)
 
     def eventFilter(self, source, event):
-        if event.type() == QEvent.Type.KeyPress:
-            is_search_input_event = self.search_visible and source == self.search_input
-            is_dialog_event = not self.search_visible and source == self
-
-            if is_search_input_event or is_dialog_event:
-                key = event.key()
-                if key == Qt.Key.Key_Down:
-                    self.move_selection(1)
-                    return True
-                elif key == Qt.Key.Key_Up:
-                    self.move_selection(-1)
-                    return True
-                elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-                    self.trigger_current_selection()
-                    return True
-                elif key == Qt.Key.Key_Escape:
-                    self.close()
-                    return True
+        if source == self.search_input and event.type() == QEvent.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Down:
+                self.move_selection(1)
+                return True
+            elif key == Qt.Key.Key_Up:
+                self.move_selection(-1)
+                return True
+            elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+                self.trigger_current_selection()
+                return True
+            elif key == Qt.Key.Key_Escape:
+                self.close()
+                return True
         return super().eventFilter(source, event)
 
     def move_selection(self, step):
@@ -329,10 +326,9 @@ class TagSelectionPopup(QDialog):
             item = self.nav_items[self.current_nav_index]
             if isinstance(item, TagGridItem):
                 self.toggle_tag(item.text_val)
-            elif self.search_visible and hasattr(item, "is_create_btn"):
+            elif hasattr(item, "is_create_btn"):
                 text = self.search_input.text().strip()
-                if text:
-                    self.create_and_select_tag(text)
+                self.create_and_select_tag(text)
 
     def load_data(self):
         self.all_db_tags = data_manager.get_all_tags()
@@ -440,16 +436,10 @@ class TagSelectionPopup(QDialog):
             PreferenceService.add_recent_tag(tag)
         
         self.sig_tags_changed.emit(list(self.selected_tags))
-
-        filter_text = ""
-        if self.search_visible:
-            self.search_input.setFocus()
-            filter_text = self.search_input.text()
-        else:
-            self.setFocus()
+        self.search_input.setFocus()
         
         old_idx = self.current_nav_index
-        self.refresh_ui(filter_text)
+        self.refresh_ui(self.search_input.text())
         
         if 0 <= old_idx < len(self.nav_items):
             self.current_nav_index = old_idx
@@ -476,7 +466,6 @@ class TagInputArea(QFrame):
         super().__init__(parent)
         self.tags = []
         self.popup = None
-        self.search_in_popup_visible = True
         
         # 【修改】最小高度从 52 减少到 47 (减少5px)
         self.setMinimumHeight(47) 
@@ -543,22 +532,13 @@ class TagInputArea(QFrame):
                 self.popup.refresh_ui(self.popup.search_input.text())
 
     def show_popup(self):
-        self.popup = TagSelectionPopup(
-            self.tags,
-            width=self.width(),
-            search_visible=self.search_in_popup_visible,
-            parent=self
-        )
+        self.popup = TagSelectionPopup(self.tags, self)
         self.popup.sig_tags_changed.connect(self.on_popup_tags_changed)
         
         global_pos = self.mapToGlobal(QPoint(0, self.height() + 4))
         self.popup.move(global_pos)
         self.popup.show()
-
-        if self.popup.search_input:
-            self.popup.search_input.setFocus()
-        else:
-            self.popup.setFocus()
+        self.popup.search_input.setFocus()
 
     def on_popup_tags_changed(self, new_tags):
         self.tags = new_tags
@@ -569,11 +549,11 @@ class TagInputArea(QFrame):
 # ==================== 5. 交互式标签输入区 ====================
 class InteractiveTagArea(QFrame):
     sig_tags_submitted = pyqtSignal(list)
+    sig_popup_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tags = []
-        self.popup = None
 
         self.setMinimumHeight(36)
         self.setObjectName("InteractiveTagArea")
@@ -615,13 +595,16 @@ class InteractiveTagArea(QFrame):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self.show_popup()
+            self.sig_popup_requested.emit()
             self.line_edit.setFocus()
         super().mousePressEvent(event)
 
     def focusInEvent(self, event):
         self.line_edit.setFocus()
         super().focusInEvent(event)
+
+    def get_tags(self):
+        return self.tags
 
     def set_tags(self, tags_list):
         self.tags = list(tags_list)
@@ -638,18 +621,22 @@ class InteractiveTagArea(QFrame):
             self._render_tags()
 
     def _render_tags(self):
-        # 1. Clear layout completely, but keep a reference to the line edit
+        # Temporarily remove the line edit
+        self.layout.removeWidget(self.line_edit)
+
+        # Clear all tag chips
         while self.layout.count() > 0:
             item = self.layout.takeAt(0)
-            if item.widget() and item.widget() != self.line_edit:
+            if item.widget():
                 item.widget().deleteLater()
 
-        # 2. Re-add widgets in the correct order
+        # Re-add tag chips
         for tag in self.tags:
             chip = TagChip(tag)
             chip.sig_remove.connect(self.remove_tag)
             self.layout.addWidget(chip)
 
+        # Add the line edit back at the end
         self.layout.addWidget(self.line_edit)
         self.line_edit.clear()
 
@@ -660,18 +647,3 @@ class InteractiveTagArea(QFrame):
             final_tags.append(current_text)
 
         self.sig_tags_submitted.emit(final_tags)
-
-    def show_popup(self):
-        if self.popup and self.popup.isVisible():
-            return
-
-        self.popup = TagSelectionPopup(self.tags, width=self.width(), search_visible=False, parent=self)
-        self.popup.sig_tags_changed.connect(self._on_tags_selected)
-
-        global_pos = self.mapToGlobal(QPoint(0, self.height() + 2))
-        self.popup.move(global_pos)
-        self.popup.show()
-        self.popup.setFocus()
-
-    def _on_tags_selected(self, new_tags):
-        self.set_tags(new_tags)

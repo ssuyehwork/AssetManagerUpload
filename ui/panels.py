@@ -285,15 +285,16 @@ class MetadataPanel(QWidget):
         tag_layout = QVBoxLayout(tag_container)
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
-
         self.tag_area = InteractiveTagArea()
         self.tag_area.setEnabled(False)
+        self.tag_area.sig_popup_requested.connect(self.show_tag_popup)
         self.tag_area.sig_tags_submitted.connect(self._on_tags_submitted)
         tag_layout.addWidget(self.tag_area)
 
         lbl_tag_title = QLabel("已保存的标签")
         lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
         tag_layout.addWidget(lbl_tag_title)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -306,21 +307,32 @@ class MetadataPanel(QWidget):
         layout.addWidget(tag_container, 1)
         self.copy_btn = FloatingCopyBtn(self)
 
+    def show_tag_popup(self):
+        if not self.isEnabled() or not self.current_file_path: return
+        if self.popup and self.popup.isVisible(): return
+
+        # Pass the currently staged tags from the input area to the popup
+        staged_tags = self.tag_area.get_tags()
+        self.popup = TagSelectionPopup(staged_tags, self)
+        self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
+
+        global_pos = self.tag_area.mapToGlobal(QPoint(0, self.tag_area.height() + 2))
+        self.popup.move(global_pos)
+        self.popup.show()
+        self.popup.search_input.setFocus()
+        self.popup.search_input.selectAll()
+
+    def handle_tag_selection_changed(self, new_tags_list):
+        # This now only updates the temporary tags in the input area (the "shopping cart")
+        self.tag_area.set_tags(new_tags_list)
+
     def _on_tags_submitted(self, submitted_tags):
-        if not self.current_file_path:
-            return
+        if not self.current_file_path: return
 
-        # Fetch the most current tags to compare against
-        current_info = TagService.get_tags(self.current_file_path)
-        original_tags = set(current_info.get("tags", []))
-
-        # Combine submitted tags with already existing tags for the final state
-        final_tags = original_tags.union(set(submitted_tags))
-
-        tags_to_add = list(final_tags - original_tags)
-
+        # Add the newly submitted tags to the existing ones
+        tags_to_add = list(set(submitted_tags) - set(self.current_tags))
         if not tags_to_add:
-            self.tag_area.set_tags([]) # Clear input on enter even if no new tags
+            self.tag_area.set_tags([]) # Clear input even if no new tags
             return
 
         updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
@@ -343,8 +355,6 @@ class MetadataPanel(QWidget):
 
     def update_info(self, filename, info):
         self.copy_btn.hide()
-        self.tag_area.setEnabled(True)
-        self.tag_area.set_tags([]) # Clear pending tags
         
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
@@ -353,21 +363,24 @@ class MetadataPanel(QWidget):
         ftype = info.get("type", "")
         row(1, "类型", "文件夹" if ftype == "FOLDER" else (info.get("ext", "").upper().replace(".", "") + " 文件"))
         sz = info.get("size", 0)
-        row(2, "大小", f"{sz} B" if sz < 1024 else (f"{sz/1024:.1f} KB" if sz < 1048576 else f"{sz/1024:.1f} MB"))
+        row(2, "大小", f"{sz} B" if sz < 1024 else (f"{sz/1024:.1f} KB" if sz < 1048576 else f"{sz/1048576:.1f} MB"))
         row(3, "修改时间", format_time(info.get("mtime")))
         row(4, "创建时间", format_time(info.get("ctime")))
         row(5, "上次访问", format_time(info.get("atime")))
         row(6, "访问次数", f"{info.get('view_count', 0)} 次")
         r = info.get("rating", 0)
         row(7, "评级", "★" * r if r else "无")
+
         self.current_tags = info.get("tags", [])
         self.render_tags()
+
+        self.tag_area.set_tags([])
+        self.tag_area.setEnabled(True)
 
     def set_current_file(self, full_path):
         self.current_file_path = full_path
 
     def render_tags(self):
-        # Renders the saved tags in the lower display area
         while self.flow_layout.count():
             item = self.flow_layout.takeAt(0)
             widget = item.widget()
