@@ -608,7 +608,6 @@ class InteractiveTagArea(QFrame):
             }
         """)
         self.line_edit.returnPressed.connect(self.submit_tags)
-        self.line_edit.textChanged.connect(self._on_text_changed)
         self.line_edit.installEventFilter(self)
         self.layout.addWidget(self.line_edit)
 
@@ -692,14 +691,3 @@ class InteractiveTagArea(QFrame):
 
         self.line_edit.clear()
         self.set_staged_tags([])
-
-    def _on_text_changed(self, text):
-        if ',' in text:
-            # Extract tag by removing comma and stripping whitespace
-            tag = text.replace(',', '').strip()
-            # Add tag if it's not empty and not already staged
-            if tag and tag not in self.staged_tags:
-                self.staged_tags.append(tag)
-                self.render()
-            # Clear the input field to allow for the next tag
-            self.line_edit.clear()
