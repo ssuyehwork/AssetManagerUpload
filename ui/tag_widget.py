@@ -203,10 +203,10 @@ class TagGridItem(QFrame):
 class TagSelectionPopup(QDialog):
     sig_tags_changed = pyqtSignal(list) 
 
-    def __init__(self, current_tags, parent=None):
+    def __init__(self, current_tags, width=360, parent=None):
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        self.setFixedSize(360, 420)
+        self.setFixedSize(width, 420)
         
         self.setStyleSheet("""
             QDialog { 
@@ -231,37 +231,12 @@ class TagSelectionPopup(QDialog):
         self.setup_ui()
         self.load_data()
         
-        self.search_input.installEventFilter(self)
+        self.installEventFilter(self)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        search_frame = QFrame()
-        search_frame.setStyleSheet("border-bottom: 1px solid #333; background-color: #252526;")
-        search_layout = QHBoxLayout(search_frame)
-        search_layout.setContentsMargins(12, 12, 12, 12)
-        
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("搜索或创建标签...")
-        self.search_input.setStyleSheet("""
-            QLineEdit { 
-                background-color: #3C3C3C; 
-                border: 1px solid #3C3C3C; 
-                border-radius: 2px; 
-                color: #CCCCCC; 
-                padding: 6px 8px;
-                font-size: 13px;
-            }
-            QLineEdit:focus { 
-                border: 1px solid #0078D7; 
-                background-color: #1E1E1E;
-            }
-        """)
-        self.search_input.textChanged.connect(self.on_search)
-        search_layout.addWidget(self.search_input)
-        layout.addWidget(search_frame)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -283,7 +258,7 @@ class TagSelectionPopup(QDialog):
         layout.addWidget(footer)
 
     def eventFilter(self, source, event):
-        if source == self.search_input and event.type() == QEvent.Type.KeyPress:
+        if event.type() == QEvent.Type.KeyPress:
             key = event.key()
             if key == Qt.Key.Key_Down:
                 self.move_selection(1)
@@ -319,80 +294,40 @@ class TagSelectionPopup(QDialog):
             item = self.nav_items[self.current_nav_index]
             if isinstance(item, TagGridItem):
                 self.toggle_tag(item.text_val)
-            elif hasattr(item, "is_create_btn"):
-                text = self.search_input.text().strip()
-                self.create_and_select_tag(text)
 
     def load_data(self):
         self.all_db_tags = data_manager.get_all_tags()
         self.recent_tags = PreferenceService.get_recent_tags()
         self.refresh_ui()
 
-    def refresh_ui(self, filter_text=""):
+    def refresh_ui(self):
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         
         self.nav_items = []
         self.current_nav_index = -1
-        filter_text = filter_text.strip().lower()
 
-        if not self.all_db_tags and not filter_text:
-            lbl = QLabel("暂无标签，请输入文字创建")
+        if not self.all_db_tags:
+            lbl = QLabel("没有可用的标签")
             lbl.setStyleSheet("color: #666; font-style: italic; margin-top: 20px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.content_layout.addWidget(lbl)
             self.content_layout.addStretch()
             return
 
-        matches = []
-        if filter_text:
-            matches = [t for t in self.all_db_tags if filter_text in t.lower()]
-            db_tags_lower = [t.lower() for t in self.all_db_tags]
-            
-            if filter_text not in db_tags_lower:
-                self.add_create_button(self.search_input.text().strip())
-            
-            if matches:
-                self.add_section("搜索结果", matches)
-        else:
-            if self.recent_tags:
-                self.add_section("最近使用", self.recent_tags, is_recent=True)
-            
-            others = [t for t in self.all_db_tags if t not in self.recent_tags]
-            if others:
-                self.add_section("所有标签", others, is_recent=False)
+        if self.recent_tags:
+            self.add_section("最近使用", self.recent_tags, is_recent=True)
+
+        others = [t for t in self.all_db_tags if t not in self.recent_tags]
+        if others:
+            self.add_section("所有标签", others, is_recent=False)
 
         self.content_layout.addStretch() 
 
         if self.nav_items:
             self.current_nav_index = 0
             self.nav_items[0].set_highlight(True)
-
-    def add_create_button(self, text):
-        btn = QPushButton(f"＋ 新建标签 \"{text}\"")
-        btn.setStyleSheet("""
-            QPushButton { 
-                text-align: left; 
-                padding: 8px; 
-                color: #4CAF50; 
-                font-weight: bold; 
-                background: #252526; 
-                border: 1px dashed #4CAF50; 
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #2D2D2D; }
-        """)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.clicked.connect(lambda: self.create_and_select_tag(text))
-        
-        btn.set_highlight = lambda active: btn.setStyleSheet(
-            f"QPushButton {{ text-align: left; padding: 8px; color: #4CAF50; font-weight: bold; background: {'#2D2D2D' if active else '#252526'}; border: 1px dashed #4CAF50; border-radius: 4px; }}"
-        )
-        btn.is_create_btn = True
-        
-        self.content_layout.addWidget(btn)
-        self.nav_items.append(btn)
 
     def add_section(self, title, tags, is_recent=False):
         lbl_title = QLabel(f"{title} ({len(tags)})")
@@ -418,9 +353,6 @@ class TagSelectionPopup(QDialog):
             
         self.content_layout.addWidget(grid_widget)
 
-    def on_search(self, text):
-        self.refresh_ui(text)
-
     def toggle_tag(self, tag):
         if tag in self.selected_tags:
             self.selected_tags.remove(tag)
@@ -429,27 +361,15 @@ class TagSelectionPopup(QDialog):
             PreferenceService.add_recent_tag(tag)
         
         self.sig_tags_changed.emit(list(self.selected_tags))
-        self.search_input.setFocus()
+        self.setFocus()
         
         old_idx = self.current_nav_index
-        self.refresh_ui(self.search_input.text())
+        self.refresh_ui()
         
         if 0 <= old_idx < len(self.nav_items):
             self.current_nav_index = old_idx
             if len(self.nav_items) > 0: self.nav_items[0].set_highlight(False)
             self.nav_items[old_idx].set_highlight(True)
-
-    def create_and_select_tag(self, tag):
-        data_manager.add_tag(tag)
-        PreferenceService.add_recent_tag(tag)
-        self.selected_tags.add(tag)
-        
-        self.all_db_tags = data_manager.get_all_tags()
-        self.recent_tags = PreferenceService.get_recent_tags()
-        
-        self.search_input.clear()
-        self.refresh_ui()
-        self.sig_tags_changed.emit(list(self.selected_tags))
 
 # ==================== 4. 标签输入区域 (对外接口) ====================
 class TagInputArea(QFrame):

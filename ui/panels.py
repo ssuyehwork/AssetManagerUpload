@@ -328,15 +328,16 @@ class MetadataPanel(QWidget):
         if not self.isEnabled() or not self.current_file_path: return
         if self.popup and self.popup.isVisible(): return
 
-        self.popup = TagSelectionPopup(self.current_tags, self)
+        input_box = self.txt_tag_input
+        popup_width = input_box.width()
+
+        self.popup = TagSelectionPopup(self.current_tags, width=popup_width, parent=self)
         self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
 
-        input_box = self.txt_tag_input
         global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
         self.popup.move(global_pos)
         self.popup.show()
-        self.popup.search_input.setFocus()
-        self.popup.search_input.selectAll()
+        self.popup.setFocus()
 
     def handle_tag_selection_changed(self, new_tags_list):
         if not self.current_file_path: return
