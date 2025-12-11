@@ -331,7 +331,12 @@ class MetadataPanel(QWidget):
         input_box = self.txt_tag_input
         popup_width = input_box.width()
 
-        self.popup = TagSelectionPopup(self.current_tags, width=popup_width, parent=self)
+        self.popup = TagSelectionPopup(
+            self.current_tags,
+            width=popup_width,
+            search_visible=False,
+            parent=self
+        )
         self.popup.sig_tags_changed.connect(self.handle_tag_selection_changed)
 
         global_pos = input_box.mapToGlobal(QPoint(0, input_box.height() + 2))
