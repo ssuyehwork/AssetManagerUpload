@@ -1,4 +1,4 @@
-﻿# G:\PYthon\AssetManager\ui\tag_widget.py
+# G:\PYthon\AssetManager\ui\tag_widget.py
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
@@ -565,3 +565,111 @@ class TagInputArea(QFrame):
         self.render()
         
         self.sig_tags_changed.emit(self.tags)
+
+# ==================== 5. 交互式标签输入区 ====================
+class InteractiveTagArea(QFrame):
+    sig_tags_submitted = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.tags = []
+        self.popup = None
+
+        self.setMinimumHeight(36)
+        self.setObjectName("InteractiveTagArea")
+        self.setStyleSheet('''
+            QFrame#InteractiveTagArea {
+                background-color: #2D2D2D;
+                border: 1px solid #444;
+                border-radius: 4px;
+            }
+            QFrame#InteractiveTagArea:focus-within {
+                border: 1px solid #0078D7;
+            }
+        ''')
+
+        self.layout = FlowLayout(self, margin=4, hSpacing=4, vSpacing=4)
+
+        self.line_edit = QLineEdit(self)
+        self.line_edit.setStyleSheet('''
+            QLineEdit {
+                border: none;
+                background: transparent;
+                color: #E0E0E0;
+                padding: 2px;
+                font-size: 12px;
+            }
+        ''')
+        self.line_edit.setMinimumWidth(100)
+        self.line_edit.installEventFilter(self)
+        self.line_edit.returnPressed.connect(self.submit_tags)
+        self.layout.addWidget(self.line_edit)
+
+    def eventFilter(self, source, event):
+        if source == self.line_edit and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Backspace and not self.line_edit.text() and self.tags:
+                self.tags.pop()
+                self._render_tags()
+                return True
+        return super().eventFilter(source, event)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.show_popup()
+            self.line_edit.setFocus()
+        super().mousePressEvent(event)
+
+    def focusInEvent(self, event):
+        self.line_edit.setFocus()
+        super().focusInEvent(event)
+
+    def set_tags(self, tags_list):
+        self.tags = list(tags_list)
+        self._render_tags()
+
+    def add_tag(self, tag):
+        if tag and tag not in self.tags:
+            self.tags.append(tag)
+            self._render_tags()
+
+    def remove_tag(self, tag):
+        if tag in self.tags:
+            self.tags.remove(tag)
+            self._render_tags()
+
+    def _render_tags(self):
+        for i in reversed(range(self.layout.count())):
+            item = self.layout.itemAt(i)
+            widget = item.widget()
+            if widget and widget != self.line_edit:
+                widget.deleteLater()
+
+        for tag in self.tags:
+            chip = TagChip(tag)
+            chip.sig_remove.connect(self.remove_tag)
+            self.layout.insertWidget(self.layout.count() - 1, chip)
+
+        self.line_edit.clear()
+
+    def submit_tags(self):
+        current_text = self.line_edit.text().strip()
+        final_tags = self.tags[:]
+        if current_text and current_text not in final_tags:
+            final_tags.append(current_text)
+
+        self.sig_tags_submitted.emit(final_tags)
+
+    def show_popup(self):
+        if self.popup and self.popup.isVisible():
+            return
+
+        self.popup = TagSelectionPopup(self.tags, width=self.width(), search_visible=False, parent=self)
+        self.popup.sig_tags_changed.connect(self._on_tags_selected)
+
+        global_pos = self.mapToGlobal(QPoint(0, self.height() + 2))
+        self.popup.move(global_pos)
+        self.popup.show()
+        self.popup.setFocus()
+
+    def _on_tags_selected(self, new_tags):
+        self.set_tags(new_tags)
