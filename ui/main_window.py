@@ -681,8 +681,11 @@ class AssetManagerWindow(QMainWindow):
         self.panel_folder.sig_add_to_favorites.connect(self.panel_fav.list_view.add_favorite)
         self.panel_folder.sig_set_auto_tag.connect(self.open_auto_tag_dialog)
 
-        self.panel_meta.sig_add_tag.connect(self.handle_add_tag_request)
-        self.panel_meta.sig_remove_tag.connect(self.handle_remove_tag_request)
+        # The following signals are removed as TagInputArea handles its own logic internally
+        # and emits a single signal `sig_tags_changed` which is handled within MetadataPanel.
+        # self.panel_meta.sig_add_tag.connect(self.handle_add_tag_request)
+        # self.panel_meta.sig_remove_tag.connect(self.handle_remove_tag_request)
+        self.panel_meta.sig_tags_updated.connect(self.handle_tags_update)
         self.panel_filter.sig_filter_changed.connect(self.proxy_model.set_filter_conditions)
 
     def on_view_selection_changed(self, selected, deselected):
@@ -701,23 +704,44 @@ class AssetManagerWindow(QMainWindow):
             if current_index.isValid():
                 self.on_asset_clicked(current_index)
 
-    def handle_add_tag_request(self, full_path, tag_name):
+    def handle_tags_update(self, file_path, new_tags_list):
+        """
+        Handles the tag update request from the MetadataPanel.
+        This is the central point for saving tags, controlling the file watcher,
+        and updating the main data model.
+        """
         self.pause_monitoring()
         try:
-            updated_info = TagService.add_tag(full_path, tag_name)
-            if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
-        finally:
-            self.resume_monitoring()
+            # Find the corresponding item in the model to get original tags
+            source_index = self.asset_model.find_index_by_path(file_path)
+            if not source_index.isValid():
+                return
 
-    def handle_remove_tag_request(self, full_path, tag_name):
-        self.pause_monitoring()
-        try:
-            updated_info = TagService.remove_tag(full_path, tag_name)
+            original_meta = self.asset_model.data(source_index, AssetModel.ROLE_META_DATA)
+            original_tags = set(original_meta.get("tags", []))
+            new_tags = set(new_tags_list)
+
+            tags_to_add = list(new_tags - original_tags)
+            tags_to_remove = list(original_tags - new_tags)
+
+            updated_info = None
+            if tags_to_add:
+                updated_info = TagService.add_tags_batch(file_path, tags_to_add)
+
+            if tags_to_remove:
+                updated_info = TagService.remove_tags_batch(file_path, tags_to_remove)
+
+            # If any change happened, update the model and the metadata panel
             if updated_info:
-                filename = os.path.basename(full_path)
-                self.panel_meta.update_info(filename, updated_info)
+                self.asset_model.setData(source_index, updated_info, AssetModel.ROLE_META_DATA)
+
+                # Check if the updated item is still the one selected
+                current_view = self.central_stack.currentWidget()
+                selection_model = current_view.selectionModel()
+                if selection_model.currentIndex() and self.proxy_model.mapToSource(selection_model.currentIndex()) == source_index:
+                    filename = self.asset_model.data(source_index, Qt.ItemDataRole.DisplayRole)
+                    self.panel_meta.update_info(filename, updated_info)
+
         finally:
             self.resume_monitoring()
 
