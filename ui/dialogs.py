@@ -124,6 +124,7 @@ class AutoTagDialog(QDialog):
         
         # 引入 TagInputArea
         self.tag_input = TagInputArea(self)
+        self.tag_input.sig_tags_changed.connect(self.on_tags_changed) # 核心修复
         self.tag_input.layout.setContentsMargins(10, 10, 10, 10)
         # 【关键】确保 TagInputArea 使用深色背景
         self.tag_input.setAutoFillBackground(True)
@@ -168,6 +169,12 @@ class AutoTagDialog(QDialog):
         if tags:
             self.tag_input.set_tags(tags)
 
+    def on_tags_changed(self, tags):
+        """当 TagInputArea 中的标签列表发生变化时，更新内部变量"""
+        self.result_tags = tags
+
     def save_tags(self):
+        # self.result_tags 已经在 on_tags_changed 中实时更新了
+        # 这里可以选择保留 get_tags() 作为双重保险，也可以直接 accept()
         self.result_tags = self.tag_input.get_tags()
         self.accept()

@@ -434,6 +434,9 @@ class TagSelectionPopup(QDialog):
 
 # ==================== 4. 标签输入区域 (对外接口) ====================
 class TagInputArea(QFrame):
+    # 【核心修复】增加信号，当标签通过任何方式（增/删）改变时发出
+    sig_tags_changed = pyqtSignal(list)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.tags = []
@@ -491,6 +494,10 @@ class TagInputArea(QFrame):
         if tag in self.tags:
             self.tags.remove(tag)
             self.render()
+
+            # 【核心修复】当通过点击 'x' 移除标签时，也需要通知外部
+            self.sig_tags_changed.emit(self.tags)
+
             if self.popup and self.popup.isVisible():
                 self.popup.selected_tags = set(self.tags)
                 self.popup.refresh_ui(self.popup.search_input.text())
@@ -507,3 +514,6 @@ class TagInputArea(QFrame):
     def on_popup_tags_changed(self, new_tags):
         self.tags = new_tags
         self.render()
+
+        # 【核心修复】当从弹窗更新标签时，同样需要通知外部
+        self.sig_tags_changed.emit(self.tags)
