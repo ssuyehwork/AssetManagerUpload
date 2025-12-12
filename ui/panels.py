@@ -320,18 +320,35 @@ class MetadataPanel(QWidget):
         self.copy_btn = FloatingCopyBtn(self)
 
     def show_tag_popup(self):
-        if not self.isEnabled() or not self.current_file_path: return
-        if self.popup and self.popup.isVisible(): return
+        logging.critical(">>> [MetadataPanel] show_tag_popup triggered.")
+
+        if not self.isEnabled():
+            logging.critical("    - Check failed: panel is not enabled.")
+            return
+        if not self.current_file_path:
+            logging.critical("    - Check failed: self.current_file_path is None.")
+            return
+        if self.popup and self.popup.isVisible():
+            logging.critical("    - Check failed: popup is already visible.")
+            return
+
+        logging.critical("    - All pre-flight checks passed.")
 
         # 获取当前已保存的标签
         current_saved_tags = self.get_current_tags()
+        logging.critical(f"    - Found {len(current_saved_tags)} saved tags to pass to popup.")
+
+        logging.critical("    - Creating TagSelectionPopup instance...")
         self.popup = TagSelectionPopup(current_saved_tags, self)
+        logging.critical("    - TagSelectionPopup instance created.")
 
         # 核心逻辑：弹窗的“预览”信号连接到编辑器
         self.popup.sig_tags_preview.connect(self.tag_editor.add_tags)
+        logging.critical("    - Connected popup's sig_tags_preview to editor's add_tags.")
 
         global_pos = self.tag_editor.mapToGlobal(QPoint(0, self.tag_editor.height() + 2))
         self.popup.move(global_pos)
+        logging.critical(f"    - Showing popup at global position: {global_pos}.")
         self.popup.show()
 
     def handle_tags_submitted(self, tags_to_submit):

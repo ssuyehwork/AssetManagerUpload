@@ -1,5 +1,6 @@
 ﻿# G:\PYthon\AssetManager\ui\tag_widget.py
 
+import logging
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
                              QGridLayout, QLayout, QSizePolicy, QWidgetItem)
@@ -359,6 +360,7 @@ class InteractiveTagArea(QFrame):
         self.layout.addWidget(self.line_edit)
 
     def mousePressEvent(self, event):
+        logging.critical(">>> [TagWidget] InteractiveTagArea.mousePressEvent received, emitting sig_clicked.")
         self.line_edit.setFocus()
         self.sig_clicked.emit()
         super().mousePressEvent(event)

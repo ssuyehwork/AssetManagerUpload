@@ -67,12 +67,12 @@ def main():
         logging.error(f"数据库初始化异常: {e}")
         return
 
-    # 【核心新增】启动时扫描硬盘，注册卷ID
-    try:
-        print("正在同步硬盘信息...")
-        StartupService.sync_drives()
-    except Exception as e:
-        logging.error(f"硬盘同步失败 (搜索功能可能受限): {e}")
+    # # 【核心新增】启动时扫描硬盘，注册卷ID (暂时禁用，因为它依赖Windows特定代码)
+    # try:
+    #     print("正在同步硬盘信息...")
+    #     StartupService.sync_drives()
+    # except Exception as e:
+    #     logging.error(f"硬盘同步失败 (搜索功能可能受限): {e}")
 
     print("=" * 50)
 

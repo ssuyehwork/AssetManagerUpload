@@ -541,15 +541,22 @@ class AssetManagerWindow(QMainWindow):
         self.update_middle_column(self.nav_bar.address_bar.text(), record_history=False, force_reload=True)
 
     def toggle_topmost(self, checked):
-        try:
-            hwnd = int(self.winId())
-            target = -1 if checked else -2
-            ctypes.windll.user32.SetWindowPos(hwnd, target, 0, 0, 0, 0, 0x0013)
-        except Exception:
-            current = self.windowFlags()
-            if checked: self.setWindowFlags(current | Qt.WindowType.WindowStaysOnTopHint)
-            else: self.setWindowFlags(current & ~Qt.WindowType.WindowStaysOnTopHint)
-            self.show()
+        if sys.platform == 'win32':
+            try:
+                hwnd = int(self.winId())
+                target = -1 if checked else -2
+                ctypes.windll.user32.SetWindowPos(hwnd, target, 0, 0, 0, 0, 0x0013)
+                return
+            except Exception:
+                pass # Fallback to Qt's method if ctypes fails
+
+        # Fallback for non-Windows or if ctypes fails
+        current = self.windowFlags()
+        if checked:
+            self.setWindowFlags(current | Qt.WindowType.WindowStaysOnTopHint)
+        else:
+            self.setWindowFlags(current & ~Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
 
     def show_color_picker(self):
         dialog = ColorPickerDialog(self)
