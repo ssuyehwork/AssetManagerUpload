@@ -325,7 +325,8 @@ class MetadataPanel(QWidget):
 
         # 【性能优化】重用弹窗实例
         if not self.popup:
-            self.popup = TagSelectionPopup([], self) # 初始为空，后续更新
+            # 【兼容性修复】明确指定使用 'preview' 模式
+            self.popup = TagSelectionPopup([], mode='preview', parent=self)
             self.popup.sig_tags_preview.connect(self.tag_editor.set_tags)
 
         if self.popup.isVisible():

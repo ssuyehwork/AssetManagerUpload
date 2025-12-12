@@ -210,9 +210,11 @@ class TagGridItem(QFrame):
 # ==================== 3. 弹窗容器 (Popup) ====================
 class TagSelectionPopup(QDialog):
     sig_tags_preview = pyqtSignal(list)
+    sig_tags_changed = pyqtSignal(list) # 【兼容性修复】恢复旧信号
 
-    def __init__(self, current_tags, parent=None):
+    def __init__(self, current_tags, mode='submit_and_close', parent=None):
         super().__init__(parent)
+        self.mode = mode # 'submit_and_close' 或 'preview'
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setFixedSize(360, 420)
         
@@ -313,8 +315,15 @@ class TagSelectionPopup(QDialog):
             self.selected_tags.add(tag)
             PreferenceService.add_recent_tag(tag)
         
-        self.sig_tags_preview.emit(list(self.selected_tags))
-        self.refresh_ui()
+        # 【兼容性修复】根据模式决定行为
+        if self.mode == 'preview':
+            # 预览模式：只发射预览信号，不关闭
+            self.sig_tags_preview.emit(list(self.selected_tags))
+            self.refresh_ui()
+        else:
+            # 默认的提交模式：发射旧信号并关闭
+            self.sig_tags_changed.emit(list(self.selected_tags))
+            self.accept() # accept() 会关闭弹窗
 
 
 # ==================== 4. 【全新】交互式标签输入区 ====================
