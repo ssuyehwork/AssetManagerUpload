@@ -1,6 +1,5 @@
 ﻿# G:\PYthon\AssetManager\ui\tag_widget.py
 
-import logging
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
                              QGridLayout, QLayout, QSizePolicy, QWidgetItem)
@@ -360,7 +359,6 @@ class InteractiveTagArea(QFrame):
         self.layout.addWidget(self.line_edit)
 
     def mousePressEvent(self, event):
-        logging.critical(">>> [TagWidget] InteractiveTagArea.mousePressEvent received, emitting sig_clicked.")
         self.line_edit.setFocus()
         self.sig_clicked.emit()
         super().mousePressEvent(event)
@@ -383,10 +381,10 @@ class InteractiveTagArea(QFrame):
             self.line_edit.clear()
             self.render_tags()
 
-    def add_tags(self, tags_to_add):
-        for tag in tags_to_add:
-            if tag not in self.pending_tags:
-                self.pending_tags.append(tag)
+    def set_tags(self, tags_from_popup):
+        # 完全使用弹窗传来的列表更新待定标签
+        self.pending_tags = sorted(list(set(tags_from_popup))) # 去重并排序
+
         self.render_tags()
 
     def on_submit(self):

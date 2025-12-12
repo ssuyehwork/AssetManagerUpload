@@ -320,42 +320,49 @@ class MetadataPanel(QWidget):
         self.copy_btn = FloatingCopyBtn(self)
 
     def show_tag_popup(self):
-        logging.critical(">>> [MetadataPanel] show_tag_popup triggered.")
-
-        if not self.isEnabled():
-            logging.critical("    - Check failed: panel is not enabled.")
-            return
-        if not self.current_file_path:
-            logging.critical("    - Check failed: self.current_file_path is None.")
-            return
-        if self.popup and self.popup.isVisible():
-            logging.critical("    - Check failed: popup is already visible.")
+        if not self.isEnabled() or not self.current_file_path:
             return
 
-        logging.critical("    - All pre-flight checks passed.")
+        # 【性能优化】重用弹窗实例
+        if not self.popup:
+            self.popup = TagSelectionPopup([], self) # 初始为空，后续更新
+            self.popup.sig_tags_preview.connect(self.tag_editor.set_tags)
 
-        # 获取当前已保存的标签
+        if self.popup.isVisible():
+            self.popup.hide()
+            return
+
+        # 在显示前，用当前文件的标签更新弹窗的状态
         current_saved_tags = self.get_current_tags()
-        logging.critical(f"    - Found {len(current_saved_tags)} saved tags to pass to popup.")
-
-        logging.critical("    - Creating TagSelectionPopup instance...")
-        self.popup = TagSelectionPopup(current_saved_tags, self)
-        logging.critical("    - TagSelectionPopup instance created.")
-
-        # 核心逻辑：弹窗的“预览”信号连接到编辑器
-        self.popup.sig_tags_preview.connect(self.tag_editor.add_tags)
-        logging.critical("    - Connected popup's sig_tags_preview to editor's add_tags.")
+        self.popup.selected_tags = set(current_saved_tags)
+        self.popup.refresh_ui() # 刷新弹窗的UI以反映最新的选择状态
 
         global_pos = self.tag_editor.mapToGlobal(QPoint(0, self.tag_editor.height() + 2))
         self.popup.move(global_pos)
-        logging.critical(f"    - Showing popup at global position: {global_pos}.")
         self.popup.show()
 
-    def handle_tags_submitted(self, tags_to_submit):
+    def handle_tags_submitted(self, submitted_tags):
         if not self.current_file_path: return
 
-        # 核心逻辑：编辑器提交的标签被批量添加到文件
-        updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_submit)
+        # 获取文件当前的标签
+        original_tags = set(self.get_current_tags())
+        submitted_tags = set(submitted_tags)
+
+        # 计算差异
+        tags_to_add = list(submitted_tags - original_tags)
+        tags_to_remove = list(original_tags - submitted_tags)
+
+        updated_info = None
+        if tags_to_add:
+            updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_add)
+
+        # 如果 updated_info 已经被更新，我们需要一个中间变量来继续操作
+        current_file_info = updated_info if updated_info else self.get_current_asset_info()
+
+        if tags_to_remove:
+            # 在可能已经更新了的 info 上执行移除
+            updated_info = TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
+
         if updated_info:
             filename = os.path.basename(self.current_file_path)
             self.update_info(filename, updated_info)
@@ -367,6 +374,12 @@ class MetadataPanel(QWidget):
         if item and hasattr(item, 'asset_info'):
             return item.asset_info.get("tags", [])
         return []
+
+    def get_current_asset_info(self):
+        item = self.table.item(0, 0)
+        if item and hasattr(item, 'asset_info'):
+            return item.asset_info
+        return {}
 
     def clear_info(self):
         self.table.clearContents()
