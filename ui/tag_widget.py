@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, 
                              QPushButton, QLabel, QFrame, QScrollArea, QDialog, 
-                             QGridLayout, QLayout, QSizePolicy)
+                             QGridLayout, QLayout, QSizePolicy, QWidgetItem)
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QRect, QSize, QEvent
 from PyQt6.QtGui import QColor, QCursor, QPainter, QPen
 
@@ -19,15 +19,13 @@ class FlowLayout(QLayout):
         # 初始化设置边距
         self.setContentsMargins(margin, margin, margin, margin)
 
-    def addItem(self, item): self._items.append(item)
+    def addItem(self, item):
+        self._items.append(item)
 
+    # 【新增】支持在指定位置插入控件
     def insertWidget(self, index, widget):
-        # QLayout.addWidget will create a QWidgetItem and call our addItem.
-        self.addWidget(widget)
-        # That item is now at the end of self._items, so we move it.
-        item = self._items.pop()
+        item = QWidgetItem(widget)
         self._items.insert(index, item)
-        # Invalidate the layout to trigger a repaint.
         self.invalidate()
 
     def horizontalSpacing(self): return self._hSpace
@@ -211,7 +209,7 @@ class TagGridItem(QFrame):
 
 # ==================== 3. 弹窗容器 (Popup) ====================
 class TagSelectionPopup(QDialog):
-    sig_tags_changed = pyqtSignal(list) 
+    sig_tags_preview = pyqtSignal(list)
 
     def __init__(self, current_tags, parent=None):
         super().__init__(parent)
@@ -235,43 +233,14 @@ class TagSelectionPopup(QDialog):
         self.selected_tags = set(current_tags) 
         self.all_db_tags = []
         self.recent_tags = []
-        self.nav_items = [] 
-        self.current_nav_index = -1
 
         self.setup_ui()
         self.load_data()
-        
-        self.search_input.installEventFilter(self)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
-        search_frame = QFrame()
-        search_frame.setStyleSheet("border-bottom: 1px solid #333; background-color: #252526;")
-        search_layout = QHBoxLayout(search_frame)
-        search_layout.setContentsMargins(12, 12, 12, 12)
-        
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("搜索或创建标签...")
-        self.search_input.setStyleSheet("""
-            QLineEdit { 
-                background-color: #3C3C3C; 
-                border: 1px solid #3C3C3C; 
-                border-radius: 2px; 
-                color: #CCCCCC; 
-                padding: 6px 8px;
-                font-size: 13px;
-            }
-            QLineEdit:focus { 
-                border: 1px solid #0078D7; 
-                background-color: #1E1E1E;
-            }
-        """)
-        self.search_input.textChanged.connect(self.on_search)
-        search_layout.addWidget(self.search_input)
-        layout.addWidget(search_frame)
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -287,122 +256,32 @@ class TagSelectionPopup(QDialog):
         self.scroll_area.setWidget(self.content_widget)
         layout.addWidget(self.scroll_area)
 
-        footer = QLabel("移动: ↑↓  选中: Enter  关闭: Esc")
-        footer.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        footer.setStyleSheet("color: #666; font-size: 11px; padding: 6px 12px; background-color: #252526; border-top: 1px solid #333;")
-        layout.addWidget(footer)
-
-    def eventFilter(self, source, event):
-        if source == self.search_input and event.type() == QEvent.Type.KeyPress:
-            key = event.key()
-            if key == Qt.Key.Key_Down:
-                self.move_selection(1)
-                return True
-            elif key == Qt.Key.Key_Up:
-                self.move_selection(-1)
-                return True
-            elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-                self.trigger_current_selection()
-                return True
-            elif key == Qt.Key.Key_Escape:
-                self.close()
-                return True
-        return super().eventFilter(source, event)
-
-    def move_selection(self, step):
-        count = len(self.nav_items)
-        if count == 0: return
-        
-        if 0 <= self.current_nav_index < count:
-            self.nav_items[self.current_nav_index].set_highlight(False)
-            
-        self.current_nav_index += step
-        if self.current_nav_index >= count: self.current_nav_index = 0
-        if self.current_nav_index < 0: self.current_nav_index = count - 1
-        
-        target = self.nav_items[self.current_nav_index]
-        target.set_highlight(True)
-        self.scroll_area.ensureWidgetVisible(target)
-
-    def trigger_current_selection(self):
-        if 0 <= self.current_nav_index < len(self.nav_items):
-            item = self.nav_items[self.current_nav_index]
-            if isinstance(item, TagGridItem):
-                self.toggle_tag(item.text_val)
-            elif hasattr(item, "is_create_btn"):
-                text = self.search_input.text().strip()
-                self.create_and_select_tag(text)
-
     def load_data(self):
         self.all_db_tags = data_manager.get_all_tags()
         self.recent_tags = PreferenceService.get_recent_tags()
         self.refresh_ui()
 
-    def refresh_ui(self, filter_text=""):
+    def refresh_ui(self):
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        
-        self.nav_items = []
-        self.current_nav_index = -1
-        filter_text = filter_text.strip().lower()
 
-        if not self.all_db_tags and not filter_text:
-            lbl = QLabel("暂无标签，请输入文字创建")
+        if not self.all_db_tags:
+            lbl = QLabel("暂无标签")
             lbl.setStyleSheet("color: #666; font-style: italic; margin-top: 20px;")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.content_layout.addWidget(lbl)
             self.content_layout.addStretch()
             return
 
-        matches = []
-        if filter_text:
-            matches = [t for t in self.all_db_tags if filter_text in t.lower()]
-            db_tags_lower = [t.lower() for t in self.all_db_tags]
-            
-            if filter_text not in db_tags_lower:
-                self.add_create_button(self.search_input.text().strip())
-            
-            if matches:
-                self.add_section("搜索结果", matches)
-        else:
-            if self.recent_tags:
-                self.add_section("最近使用", self.recent_tags, is_recent=True)
-            
-            others = [t for t in self.all_db_tags if t not in self.recent_tags]
-            if others:
-                self.add_section("所有标签", others, is_recent=False)
+        if self.recent_tags:
+            self.add_section("最近使用", self.recent_tags, is_recent=True)
 
-        self.content_layout.addStretch() 
+        others = [t for t in self.all_db_tags if t not in self.recent_tags]
+        if others:
+            self.add_section("所有标签", others, is_recent=False)
 
-        if self.nav_items:
-            self.current_nav_index = 0
-            self.nav_items[0].set_highlight(True)
-
-    def add_create_button(self, text):
-        btn = QPushButton(f"＋ 新建标签 \"{text}\"")
-        btn.setStyleSheet("""
-            QPushButton { 
-                text-align: left; 
-                padding: 8px; 
-                color: #4CAF50; 
-                font-weight: bold; 
-                background: #252526; 
-                border: 1px dashed #4CAF50; 
-                border-radius: 4px;
-            }
-            QPushButton:hover { background-color: #2D2D2D; }
-        """)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.clicked.connect(lambda: self.create_and_select_tag(text))
-        
-        btn.set_highlight = lambda active: btn.setStyleSheet(
-            f"QPushButton {{ text-align: left; padding: 8px; color: #4CAF50; font-weight: bold; background: {'#2D2D2D' if active else '#252526'}; border: 1px dashed #4CAF50; border-radius: 4px; }}"
-        )
-        btn.is_create_btn = True
-        
-        self.content_layout.addWidget(btn)
-        self.nav_items.append(btn)
+        self.content_layout.addStretch()
 
     def add_section(self, title, tags, is_recent=False):
         lbl_title = QLabel(f"{title} ({len(tags)})")
@@ -424,12 +303,8 @@ class TagSelectionPopup(QDialog):
             item.sig_clicked.connect(self.toggle_tag)
             
             grid.addWidget(item, row, col)
-            self.nav_items.append(item)
             
         self.content_layout.addWidget(grid_widget)
-
-    def on_search(self, text):
-        self.refresh_ui(text)
 
     def toggle_tag(self, tag):
         if tag in self.selected_tags:
@@ -438,165 +313,111 @@ class TagSelectionPopup(QDialog):
             self.selected_tags.add(tag)
             PreferenceService.add_recent_tag(tag)
         
-        self.sig_tags_changed.emit(list(self.selected_tags))
-        self.search_input.setFocus()
-        
-        old_idx = self.current_nav_index
-        self.refresh_ui(self.search_input.text())
-        
-        if 0 <= old_idx < len(self.nav_items):
-            self.current_nav_index = old_idx
-            if len(self.nav_items) > 0: self.nav_items[0].set_highlight(False)
-            self.nav_items[old_idx].set_highlight(True)
-
-    def create_and_select_tag(self, tag):
-        data_manager.add_tag(tag)
-        PreferenceService.add_recent_tag(tag)
-        self.selected_tags.add(tag)
-        
-        self.all_db_tags = data_manager.get_all_tags()
-        self.recent_tags = PreferenceService.get_recent_tags()
-        
-        self.search_input.clear()
+        self.sig_tags_preview.emit(list(self.selected_tags))
         self.refresh_ui()
-        self.sig_tags_changed.emit(list(self.selected_tags))
 
-# ==================== 4. 交互式标签区 (核心) ====================
+
+# ==================== 4. 【全新】交互式标签输入区 ====================
 class InteractiveTagArea(QFrame):
     sig_tags_submitted = pyqtSignal(list)
+    sig_clicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.pending_tags = []
+        self.line_edit_is_empty = True
+
+        self.setMinimumHeight(47)
         self.setObjectName("InteractiveTagArea")
         self.setStyleSheet("""
             QFrame#InteractiveTagArea {
-                background-color: #1a1a1a;
+                background-color: #252525;
                 border: 1px solid #444;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QFrame#InteractiveTagArea:focus-within {
-                border: 1px solid #0078d7;
+                border: 1px solid #0078D7;
             }
         """)
 
-        self.layout = FlowLayout(self, margin=4, hSpacing=4, vSpacing=4)
-
-        self.line_edit = QLineEdit(self)
+        self.layout = FlowLayout(self, margin=7, hSpacing=8, vSpacing=8)
+        self.line_edit = QLineEdit()
         self.line_edit.setPlaceholderText("添加标签...")
         self.line_edit.setStyleSheet("""
             QLineEdit {
                 border: none;
                 background: transparent;
-                padding: 4px;
-                color: #ddd;
+                color: #E0E0E0;
+                font-size: 12px;
+                min-width: 100px;
             }
         """)
-        self.line_edit.textChanged.connect(self._on_text_changed)
-        self.line_edit.returnPressed.connect(self._on_return_pressed)
-        # Install an event filter to catch backspace on an empty line edit
-        self.line_edit.installEventFilter(self)
+        self.line_edit.textChanged.connect(self.on_text_changed)
+        self.line_edit.returnPressed.connect(self.on_submit)
 
+        # 将输入框添加到布局
         self.layout.addWidget(self.line_edit)
 
-    def eventFilter(self, source, event):
-        if (source is self.line_edit and
-            event.type() == QEvent.Type.KeyPress and
-            event.key() == Qt.Key.Key_Backspace and
-            not self.line_edit.text()):
+    def mousePressEvent(self, event):
+        self.line_edit.setFocus()
+        self.sig_clicked.emit()
+        super().mousePressEvent(event)
 
-            self._remove_last_tag()
-            return True # Event handled
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Backspace and self.line_edit_is_empty:
+            if self.pending_tags:
+                tag_to_remove = self.pending_tags.pop()
+                self.render_tags()
+        else:
+            super().keyPressEvent(event)
 
-        return super().eventFilter(source, event)
-
-    def _on_text_changed(self, text):
-        if ',' in text:
-            # Split by comma, create tags for all but the last part
-            parts = text.split(',')
-            for part in parts[:-1]:
-                tag_text = part.strip()
-                if tag_text:
-                    self._add_tag(tag_text)
-
-            # Keep the last part in the line edit
-            self.line_edit.setText(parts[-1])
-
-    def _on_return_pressed(self):
-        # Add any remaining text as a tag
-        remaining_text = self.line_edit.text().strip()
-        if remaining_text:
-            self._add_tag(remaining_text)
+    def on_text_changed(self, text):
+        self.line_edit_is_empty = not bool(text)
+        if "," in text:
+            tags = [t.strip() for t in text.split(",") if t.strip()]
+            for tag in tags:
+                if tag not in self.pending_tags:
+                    self.pending_tags.append(tag)
             self.line_edit.clear()
+            self.render_tags()
 
-        # Emit the signal with the list of current tags
-        self.sig_tags_submitted.emit(self.get_tags())
+    def add_tags(self, tags_to_add):
+        for tag in tags_to_add:
+            if tag not in self.pending_tags:
+                self.pending_tags.append(tag)
+        self.render_tags()
 
-    def _add_tag(self, text):
-        chip = TagChip(text)
-        chip.sig_remove.connect(self._remove_tag_by_name)
+    def on_submit(self):
+        # 首先处理输入框中可能存在的未转换文本
+        current_text = self.line_edit.text().strip()
+        if current_text and current_text not in self.pending_tags:
+            self.pending_tags.append(current_text)
 
-        # Insert before the line edit
-        index = self.layout.count() - 1
-        self.layout.insertWidget(index, chip)
-
-    def _remove_last_tag(self):
-        # Find the last TagChip before the line edit and remove it
-        for i in range(self.layout.count() - 2, -1, -1):
-            item = self.layout.itemAt(i)
-            widget = item.widget()
-            if isinstance(widget, TagChip):
-                widget.deleteLater()
-                # We need to take the item out of the layout
-                self.layout.takeAt(i)
-                self.update()
-                break
-
-    def _remove_tag_by_name(self, name):
-        for i in range(self.layout.count()):
-            item = self.layout.itemAt(i)
-            widget = item.widget()
-            if isinstance(widget, TagChip) and widget.text == name:
-                widget.deleteLater()
-                self.layout.takeAt(i)
-                self.update()
-                break
-
-    def get_tags(self):
-        tags = []
-        for i in range(self.layout.count()):
-            item = self.layout.itemAt(i)
-            widget = item.widget()
-            if isinstance(widget, TagChip):
-                tags.append(widget.text)
-        return tags
-
-    def set_tags(self, tags):
-        # Clear existing tags
-        self.clear_tags()
-
-        # Add the new tags
-        for tag in tags:
-            self._add_tag(tag)
+        if self.pending_tags:
+            self.sig_tags_submitted.emit(list(self.pending_tags))
+            self.pending_tags.clear()
+            self.render_tags()
 
         self.line_edit.clear()
 
-    def clear_tags(self):
-        # Remove all TagChip widgets
+    def render_tags(self):
+        # 清空布局，但不删除输入框
         while self.layout.count() > 1:
-            item = self.layout.itemAt(0)
-            widget = item.widget()
-            if isinstance(widget, TagChip):
-                widget.deleteLater()
-                self.layout.takeAt(0)
-        self.update()
+            item = self.layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
-    def setEnabled(self, enabled):
-        super().setEnabled(enabled)
-        if enabled:
-            self.line_edit.setPlaceholderText("添加标签...")
-        else:
-            self.clear_tags()
-            self.line_edit.setPlaceholderText("请先选择一个项目")
+        # 重新插入所有待定标签
+        for tag in self.pending_tags:
+            chip = TagChip(tag)
+            chip.sig_remove.connect(self.remove_tag)
+            # 在输入框之前插入
+            self.layout.insertWidget(self.layout.count() - 1, chip)
+
+    def remove_tag(self, tag):
+        if tag in self.pending_tags:
+            self.pending_tags.remove(tag)
+            self.render_tags()
 
 
 # ==================== 5. 标签输入区域 (对外接口) ====================

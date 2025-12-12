@@ -23,8 +23,69 @@ except ImportError:
 
 from services.preference_service import PreferenceService
 # 【核心修复】从 tag_widget 导入正确的弹窗
-from ui.tag_widget import InteractiveTagArea
+from ui.tag_widget import TagSelectionPopup, TagChip, InteractiveTagArea
 from services.tag_service import TagService
+
+# ==================== TagFlowLayout ====================
+class TagFlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, hSpacing=6, vSpacing=6):
+        super(TagFlowLayout, self).__init__(parent)
+        self._hSpace = hSpacing
+        self._vSpace = vSpacing
+        self._items = []
+        self.setContentsMargins(margin, margin, margin, margin)
+
+    def addItem(self, item): self._items.append(item)
+    def horizontalSpacing(self): return self._hSpace
+    def verticalSpacing(self): return self._vSpace
+    def expandingDirections(self): return Qt.Orientation(0)
+    def hasHeightForWidth(self): return True
+    def heightForWidth(self, width): return self.doLayout(QRect(0, 0, width, 0), True)
+    def count(self): return len(self._items)
+    def itemAt(self, index): return self._items[index] if 0 <= index < len(self._items) else None
+    def minimumSize(self):
+        size = QSize()
+        for item in self._items: size = size.expandedTo(item.minimumSize())
+        left, top, right, bottom = self.getContentsMargins()
+        size += QSize(left + right, top + bottom)
+        return size
+    def setGeometry(self, rect):
+        super(TagFlowLayout, self).setGeometry(rect)
+        self.doLayout(rect, False)
+    def sizeHint(self): return self.minimumSize()
+    def takeAt(self, index): return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def doLayout(self, rect, testOnly):
+        left, top, right, bottom = self.getContentsMargins()
+        effectiveRect = rect.adjusted(left, top, -right, -bottom)
+        x = effectiveRect.x()
+        y = effectiveRect.y()
+        lineHeight = 0
+        for item in self._items:
+            wid = item.widget()
+            spaceX = self.horizontalSpacing()
+            spaceY = self.verticalSpacing()
+            nextX = x + item.sizeHint().width() + spaceX
+            if nextX - spaceX > effectiveRect.right() and lineHeight > 0:
+                x = effectiveRect.x()
+                y = y + lineHeight + spaceY
+                nextX = x + item.sizeHint().width() + spaceX
+                lineHeight = 0
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            x = nextX
+            lineHeight = max(lineHeight, item.sizeHint().height())
+        return y + lineHeight - rect.y() + bottom
+
+# ==================== ClickableLineEdit (for tag input) ====================
+class ClickableLineEdit(QLineEdit):
+    """A QLineEdit that emits a 'clicked' signal on mouse press."""
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
 
 # ==================== Utils ====================
 def format_time(t): return time.strftime("%Y/%m/%d %H:%M", time.localtime(t)) if t else "-"
@@ -187,18 +248,21 @@ class FavoritesPanel(QWidget):
         self.list_view = FavoritesListWidget()
         layout.addWidget(self.list_view)
 
-# ==================== MetadataPanel ====================
+# ==================== MetadataPanel (重构后) ====================
 class MetadataPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_file_path = None
-        self.current_tags = []
+        self.popup = None
 
+        # 主布局
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        self.table = QTableWidget(8, 2) 
+        # --- 1. 顶部表格 ---
+        self.table = QTableWidget(8, 2)
+        # (表格样式设置保持不变)
         self.table.setHorizontalHeaderLabels(["属性", "值"])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -210,51 +274,88 @@ class MetadataPanel(QWidget):
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.table.setFixedHeight(285) 
+        self.table.setFixedHeight(285)
         layout.addWidget(self.table, 0)
 
-        # Container for the tag area, preserving the visual style
+        # --- 分隔线 ---
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("background-color: #000; border: none; min-height: 1px; max-height: 1px;")
+        layout.addWidget(line)
+
+        # --- 2. 底部标签区域 ---
         tag_container = QWidget()
         tag_container.setStyleSheet("background-color: #252525;")
         tag_layout = QVBoxLayout(tag_container)
         tag_layout.setContentsMargins(10, 10, 10, 10)
         tag_layout.setSpacing(8)
 
-        self.tag_area = InteractiveTagArea()
-        self.tag_area.setEnabled(False)
-        self.tag_area.sig_tags_submitted.connect(self.handle_tags_submitted)
-        tag_layout.addWidget(self.tag_area)
+        # 2.1 【新增】交互式标签编辑器 (待绑定)
+        self.tag_editor = InteractiveTagArea()
+        self.tag_editor.setEnabled(False)
+        self.tag_editor.sig_clicked.connect(self.show_tag_popup)
+        self.tag_editor.sig_tags_submitted.connect(self.handle_tags_submitted)
+        tag_layout.addWidget(self.tag_editor)
+
+        # 2.2 已绑定标签的标题
+        lbl_tag_title = QLabel("已绑定标签")
+        lbl_tag_title.setStyleSheet("color: #ccc; font-weight: bold; font-size: 12px; margin-top: 5px;")
+        tag_layout.addWidget(lbl_tag_title)
+
+        # 2.3 已绑定标签的显示区域
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        self.tag_display_content = QWidget()
+        self.tag_display_content.setStyleSheet("background: transparent;")
+        self.tag_display_layout = TagFlowLayout(self.tag_display_content, margin=0, hSpacing=6, vSpacing=6)
+
+        scroll.setWidget(self.tag_display_content)
+        tag_layout.addWidget(scroll, 1) # 占据剩余空间
 
         layout.addWidget(tag_container, 1)
-
         self.copy_btn = FloatingCopyBtn(self)
 
-    def handle_tags_submitted(self, new_tags_list):
+    def show_tag_popup(self):
+        if not self.isEnabled() or not self.current_file_path: return
+        if self.popup and self.popup.isVisible(): return
+
+        # 获取当前已保存的标签
+        current_saved_tags = self.get_current_tags()
+        self.popup = TagSelectionPopup(current_saved_tags, self)
+
+        # 核心逻辑：弹窗的“预览”信号连接到编辑器
+        self.popup.sig_tags_preview.connect(self.tag_editor.add_tags)
+
+        global_pos = self.tag_editor.mapToGlobal(QPoint(0, self.tag_editor.height() + 2))
+        self.popup.move(global_pos)
+        self.popup.show()
+
+    def handle_tags_submitted(self, tags_to_submit):
         if not self.current_file_path: return
 
-        original_tags = set(self.current_tags)
-        new_tags = set(new_tags_list)
-
-        tags_to_add = list(new_tags - original_tags)
-        tags_to_remove = list(original_tags - new_tags)
-
-        updated_info = None
-        if tags_to_add:
-            TagService.add_tags_batch(self.current_file_path, tags_to_add)
-        if tags_to_remove:
-            TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
-
-        updated_info = TagService.get_info(self.current_file_path)
-
+        # 核心逻辑：编辑器提交的标签被批量添加到文件
+        updated_info = TagService.add_tags_batch(self.current_file_path, tags_to_submit)
         if updated_info:
             filename = os.path.basename(self.current_file_path)
             self.update_info(filename, updated_info)
 
+    def get_current_tags(self):
+        # 辅助函数，从表格数据中获取当前已保存的标签
+        # (这里假设标签信息存储在某个地方，实际应从 self.current_asset_info 获取)
+        item = self.table.item(0, 0)
+        if item and hasattr(item, 'asset_info'):
+            return item.asset_info.get("tags", [])
+        return []
+
     def clear_info(self):
         self.table.clearContents()
         self.current_file_path = None
-        self.current_tags = []
-        self.tag_area.setEnabled(False)
+        self.tag_editor.setEnabled(False)
+        self.render_saved_tags([]) # 清空已绑定标签显示
 
     def check_selection(self, label):
         if label.hasSelectedText(): self.copy_btn.show_at(QCursor.pos(), label.selectedText().strip())
@@ -262,10 +363,18 @@ class MetadataPanel(QWidget):
 
     def update_info(self, filename, info):
         self.copy_btn.hide()
+        self.tag_editor.setEnabled(True)
+
+        # 将完整信息附加到表格的某个不可见项上，便于后续引用
+        # 这是一个小技巧，避免使用全局变量
+        dummy_item = QTableWidgetItem()
+        dummy_item.asset_info = info
+        self.table.setItem(0, 0, dummy_item)
         
         def row(i, k, v):
             self.table.setItem(i, 0, QTableWidgetItem(k))
             self.table.setCellWidget(i, 1, SelectableLabel(str(v), self))
+
         row(0, "文件名", filename)
         ftype = info.get("type", "")
         row(1, "类型", "文件夹" if ftype == "FOLDER" else (info.get("ext", "").upper().replace(".", "") + " 文件"))
@@ -278,12 +387,33 @@ class MetadataPanel(QWidget):
         r = info.get("rating", 0)
         row(7, "评级", "★" * r if r else "无")
 
-        self.current_tags = info.get("tags", [])
-        self.tag_area.set_tags(self.current_tags)
-        self.tag_area.setEnabled(True)
+        saved_tags = info.get("tags", [])
+        self.render_saved_tags(saved_tags)
 
     def set_current_file(self, full_path):
         self.current_file_path = full_path
+
+    def render_saved_tags(self, tags_list):
+        # 清空旧的已绑定标签
+        while self.tag_display_layout.count():
+            item = self.tag_display_layout.takeAt(0)
+            widget = item.widget()
+            if widget: widget.deleteLater()
+
+        # 渲染新的已绑定标签
+        for tag in tags_list:
+            chip = TagChip(tag)
+            chip.sig_remove.connect(self.request_remove_tag_from_chip)
+            self.tag_display_layout.addWidget(chip)
+
+    def request_remove_tag_from_chip(self, tag_name):
+        if not self.current_file_path: return
+
+        # 从已绑定标签中移除
+        updated_info = TagService.remove_tag(self.current_file_path, tag_name)
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
 class FolderPanel(QWidget):
     sig_add_to_favorites = pyqtSignal(str)
