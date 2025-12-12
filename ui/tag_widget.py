@@ -20,6 +20,16 @@ class FlowLayout(QLayout):
         self.setContentsMargins(margin, margin, margin, margin)
 
     def addItem(self, item): self._items.append(item)
+
+    def insertWidget(self, index, widget):
+        # QLayout.addWidget will create a QWidgetItem and call our addItem.
+        self.addWidget(widget)
+        # That item is now at the end of self._items, so we move it.
+        item = self._items.pop()
+        self._items.insert(index, item)
+        # Invalidate the layout to trigger a repaint.
+        self.invalidate()
+
     def horizontalSpacing(self): return self._hSpace
     def verticalSpacing(self): return self._vSpace
     def expandingDirections(self): return Qt.Orientation(0)
@@ -451,7 +461,145 @@ class TagSelectionPopup(QDialog):
         self.refresh_ui()
         self.sig_tags_changed.emit(list(self.selected_tags))
 
-# ==================== 4. 标签输入区域 (对外接口) ====================
+# ==================== 4. 交互式标签区 (核心) ====================
+class InteractiveTagArea(QFrame):
+    sig_tags_submitted = pyqtSignal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("InteractiveTagArea")
+        self.setStyleSheet("""
+            QFrame#InteractiveTagArea {
+                background-color: #1a1a1a;
+                border: 1px solid #444;
+                border-radius: 3px;
+            }
+            QFrame#InteractiveTagArea:focus-within {
+                border: 1px solid #0078d7;
+            }
+        """)
+
+        self.layout = FlowLayout(self, margin=4, hSpacing=4, vSpacing=4)
+
+        self.line_edit = QLineEdit(self)
+        self.line_edit.setPlaceholderText("添加标签...")
+        self.line_edit.setStyleSheet("""
+            QLineEdit {
+                border: none;
+                background: transparent;
+                padding: 4px;
+                color: #ddd;
+            }
+        """)
+        self.line_edit.textChanged.connect(self._on_text_changed)
+        self.line_edit.returnPressed.connect(self._on_return_pressed)
+        # Install an event filter to catch backspace on an empty line edit
+        self.line_edit.installEventFilter(self)
+
+        self.layout.addWidget(self.line_edit)
+
+    def eventFilter(self, source, event):
+        if (source is self.line_edit and
+            event.type() == QEvent.Type.KeyPress and
+            event.key() == Qt.Key.Key_Backspace and
+            not self.line_edit.text()):
+
+            self._remove_last_tag()
+            return True # Event handled
+
+        return super().eventFilter(source, event)
+
+    def _on_text_changed(self, text):
+        if ',' in text:
+            # Split by comma, create tags for all but the last part
+            parts = text.split(',')
+            for part in parts[:-1]:
+                tag_text = part.strip()
+                if tag_text:
+                    self._add_tag(tag_text)
+
+            # Keep the last part in the line edit
+            self.line_edit.setText(parts[-1])
+
+    def _on_return_pressed(self):
+        # Add any remaining text as a tag
+        remaining_text = self.line_edit.text().strip()
+        if remaining_text:
+            self._add_tag(remaining_text)
+            self.line_edit.clear()
+
+        # Emit the signal with the list of current tags
+        self.sig_tags_submitted.emit(self.get_tags())
+
+    def _add_tag(self, text):
+        chip = TagChip(text)
+        chip.sig_remove.connect(self._remove_tag_by_name)
+
+        # Insert before the line edit
+        index = self.layout.count() - 1
+        self.layout.insertWidget(index, chip)
+
+    def _remove_last_tag(self):
+        # Find the last TagChip before the line edit and remove it
+        for i in range(self.layout.count() - 2, -1, -1):
+            item = self.layout.itemAt(i)
+            widget = item.widget()
+            if isinstance(widget, TagChip):
+                widget.deleteLater()
+                # We need to take the item out of the layout
+                self.layout.takeAt(i)
+                self.update()
+                break
+
+    def _remove_tag_by_name(self, name):
+        for i in range(self.layout.count()):
+            item = self.layout.itemAt(i)
+            widget = item.widget()
+            if isinstance(widget, TagChip) and widget.text == name:
+                widget.deleteLater()
+                self.layout.takeAt(i)
+                self.update()
+                break
+
+    def get_tags(self):
+        tags = []
+        for i in range(self.layout.count()):
+            item = self.layout.itemAt(i)
+            widget = item.widget()
+            if isinstance(widget, TagChip):
+                tags.append(widget.text)
+        return tags
+
+    def set_tags(self, tags):
+        # Clear existing tags
+        self.clear_tags()
+
+        # Add the new tags
+        for tag in tags:
+            self._add_tag(tag)
+
+        self.line_edit.clear()
+
+    def clear_tags(self):
+        # Remove all TagChip widgets
+        while self.layout.count() > 1:
+            item = self.layout.itemAt(0)
+            widget = item.widget()
+            if isinstance(widget, TagChip):
+                widget.deleteLater()
+                self.layout.takeAt(0)
+        self.update()
+
+    def setEnabled(self, enabled):
+        super().setEnabled(enabled)
+        if enabled:
+            self.line_edit.setPlaceholderText("添加标签...")
+        else:
+            self.clear_tags()
+            self.line_edit.setPlaceholderText("请先选择一个项目")
+
+
+# ==================== 5. 标签输入区域 (对外接口) ====================
 class TagInputArea(QFrame):
     sig_tags_changed = pyqtSignal(list)
 
