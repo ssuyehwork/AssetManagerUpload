@@ -189,9 +189,6 @@ class FavoritesPanel(QWidget):
 
 # ==================== MetadataPanel ====================
 class MetadataPanel(QWidget):
-    sig_batch_update_started = pyqtSignal()
-    sig_batch_update_finished = pyqtSignal()
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_file_path = None
@@ -235,26 +232,23 @@ class MetadataPanel(QWidget):
     def handle_tags_submitted(self, new_tags_list):
         if not self.current_file_path: return
 
-        self.sig_batch_update_started.emit()
-        try:
-            original_tags = set(self.current_tags)
-            new_tags = set(new_tags_list)
+        original_tags = set(self.current_tags)
+        new_tags = set(new_tags_list)
 
-            tags_to_add = list(new_tags - original_tags)
-            tags_to_remove = list(original_tags - new_tags)
+        tags_to_add = list(new_tags - original_tags)
+        tags_to_remove = list(original_tags - new_tags)
 
-            if tags_to_add:
-                TagService.add_tags_batch(self.current_file_path, tags_to_add)
-            if tags_to_remove:
-                TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
+        updated_info = None
+        if tags_to_add:
+            TagService.add_tags_batch(self.current_file_path, tags_to_add)
+        if tags_to_remove:
+            TagService.remove_tags_batch(self.current_file_path, tags_to_remove)
 
-            updated_info = TagService.get_info(self.current_file_path)
+        updated_info = TagService.get_info(self.current_file_path)
 
-            if updated_info:
-                filename = os.path.basename(self.current_file_path)
-                self.update_info(filename, updated_info)
-        finally:
-            self.sig_batch_update_finished.emit()
+        if updated_info:
+            filename = os.path.basename(self.current_file_path)
+            self.update_info(filename, updated_info)
 
     def clear_info(self):
         self.table.clearContents()

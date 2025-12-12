@@ -681,10 +681,6 @@ class AssetManagerWindow(QMainWindow):
         self.panel_folder.sig_add_to_favorites.connect(self.panel_fav.list_view.add_favorite)
         self.panel_folder.sig_set_auto_tag.connect(self.open_auto_tag_dialog)
 
-        # Connect metadata panel signals for file watcher safety
-        self.panel_meta.sig_batch_update_started.connect(self.pause_monitoring)
-        self.panel_meta.sig_batch_update_finished.connect(self.resume_monitoring)
-
         self.panel_filter.sig_filter_changed.connect(self.proxy_model.set_filter_conditions)
 
     def on_view_selection_changed(self, selected, deselected):
